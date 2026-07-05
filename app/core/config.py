@@ -1,0 +1,22 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    project_name: str = "Document Processing API"
+    environment: str = "development"
+    database_url: str = "sqlite:///./documents.db"
+    storage_dir: str = "storage/uploads"
+    max_upload_size_bytes: int = 10 * 1024 * 1024
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    ai_summary_max_chars: int = 12000
+    ai_summary_max_output_tokens: int = 1800
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+settings = Settings()

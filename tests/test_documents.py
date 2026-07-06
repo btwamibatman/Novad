@@ -1,11 +1,14 @@
 from io import BytesIO
 import os
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from app.core.config import settings
+from app.services import text_analysis
 from app.services.file_storage import resolve_stored_path
 
 
@@ -196,6 +199,75 @@ def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypa
     data = response.json()
     assert data["status"] == "processed"
     assert "OCR fallback extracted English text" in data["extracted_text"]
+
+
+def test_run_ocr_uses_configured_russian_kazakh_english_languages(tmp_path, monkeypatch):
+    input_path = tmp_path / "input.pdf"
+    output_path = tmp_path / "output.pdf"
+    input_path.write_bytes(make_pdf_without_text())
+    captured_kwargs = {}
+
+    def fake_ocr(input_file, output_file, **kwargs):
+        captured_kwargs.update(kwargs)
+        Path(output_file).write_bytes(make_pdf_with_text("OCR fallback extracted English text for analysis."))
+        return 0
+
+    monkeypatch.setattr(text_analysis.settings, "ocr_languages", "rus+kaz+eng")
+    monkeypatch.setitem(sys.modules, "ocrmypdf", SimpleNamespace(ocr=fake_ocr))
+
+    assert text_analysis.run_ocr(input_path, output_path) == 0
+    assert captured_kwargs["language"] == ("rus", "kaz", "eng")
+
+
+def test_analyze_pdf_reports_ocr_exit_failure(client, monkeypatch):
+    pdf_bytes = make_pdf_without_text()
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": ("scan.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload.status_code == 201
+
+    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
+        return 2
+
+    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error_message"] == "OCR failed: OCR engine exited with code 2"
+
+
+def test_analyze_pdf_reports_no_text_after_ocr(client, monkeypatch):
+    pdf_bytes = make_pdf_without_text()
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": ("scan.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload.status_code == 201
+
+    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
+        output_path.write_bytes(make_pdf_without_text())
+        return 0
+
+    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert "no readable text was found after OCR" in data["error_message"]
+
+
+def test_ocr_language_missing_error_is_user_readable(monkeypatch):
+    monkeypatch.setattr(text_analysis.settings, "ocr_languages", "rus+kaz+eng")
+
+    message = text_analysis.format_ocr_error(RuntimeError("Error opening data file kaz.traineddata"))
+
+    assert message == "OCR failed: configured language data is missing (rus+kaz+eng)"
 
 
 def test_delete_document_removes_database_record_and_file(client):

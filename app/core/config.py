@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     ai_summary_max_chars: int = 12000
     ai_summary_max_output_tokens: int = 1800
+    ocr_languages: str = "rus+kaz+eng"
+    ocr_min_text_signal_chars: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",

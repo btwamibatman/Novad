@@ -36,6 +36,15 @@ def make_pdf_with_text(text: str) -> bytes:
     return output.getvalue()
 
 
+def make_pdf_without_text() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
 def upload_txt(client, filename: str = "sample.txt", content: bytes | None = None):
     payload = content or b"This document contains enough English text for language detection."
     return client.post(
@@ -164,6 +173,29 @@ def test_analyze_pdf_with_text_layer(client):
     assert data["status"] == "processed"
     assert data["detected_language"] == "en"
     assert "extractable English text" in data["extracted_text"]
+
+
+def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypatch):
+    pdf_bytes = make_pdf_without_text()
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": ("scan.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload.status_code == 201
+
+    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
+        assert input_path.exists()
+        output_path.write_bytes(make_pdf_with_text("OCR fallback extracted English text for analysis."))
+        return 0
+
+    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "processed"
+    assert "OCR fallback extracted English text" in data["extracted_text"]
 
 
 def test_delete_document_removes_database_record_and_file(client):

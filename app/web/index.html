@@ -143,6 +143,24 @@
       </main>
     </div>
 
+    <section class="ai-chat-popup" id="aiChatPopup" aria-label="AI document chat" hidden>
+      <div class="ai-chat-head">
+        <div>
+          <h2 class="panel-title">AI Document Chat</h2>
+          <p class="ai-chat-subtitle" id="aiChatState">Choose a processed document.</p>
+        </div>
+        <button class="button small icon-btn" type="button" id="aiChatClose" aria-label="Close AI chat">×</button>
+      </div>
+      <div class="ai-chat-body">
+        <select class="select" id="aiChatDocumentSelect" aria-label="Choose document for AI chat"></select>
+        <div class="ai-chat-messages" id="aiChatMessages"></div>
+        <form class="ai-chat-form" id="aiChatForm">
+          <textarea class="field ai-chat-input" id="aiChatInput" rows="3" maxlength="1000" placeholder="Ask about the selected document..."></textarea>
+          <button class="button primary" type="submit" id="aiChatSend">Send</button>
+        </form>
+      </div>
+    </section>
+    <button class="ai-chat-toggle" type="button" id="aiChatToggle" aria-label="Open AI chat">AI</button>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
     <script src="/web/app.js"></script>
   </body>

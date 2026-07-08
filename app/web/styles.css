@@ -419,10 +419,110 @@ tr[data-selected="true"] {
   gap: 8px;
 }
 
-.toast-stack {
+.ai-chat-toggle {
   position: fixed;
   right: 18px;
   bottom: 18px;
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 780;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+
+.ai-chat-toggle:hover {
+  background: var(--accent-2);
+}
+
+.ai-chat-popup {
+  position: fixed;
+  right: 18px;
+  bottom: 88px;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(620px, calc(100vh - 120px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 19;
+}
+
+.ai-chat-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+
+.ai-chat-subtitle {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.ai-chat-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.ai-chat-messages {
+  min-height: 220px;
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 10px;
+}
+
+.ai-chat-message {
+  width: fit-content;
+  max-width: 88%;
+  margin-bottom: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 9px 10px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.ai-chat-message.user {
+  margin-left: auto;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ai-chat-message.assistant {
+  background: var(--surface);
+}
+
+.ai-chat-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.ai-chat-input {
+  min-height: 76px;
+  padding-top: 9px;
+  resize: vertical;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 88px;
   display: grid;
   gap: 10px;
   z-index: 10;
@@ -509,5 +609,24 @@ tr[data-selected="true"] {
 
   .icon-btn {
     width: 38px;
+  }
+
+  .ai-chat-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-chat-toggle {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .ai-chat-popup {
+    right: 14px;
+    bottom: 82px;
+  }
+
+  .toast-stack {
+    right: 14px;
+    bottom: 82px;
   }
 }

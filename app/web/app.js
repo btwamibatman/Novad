@@ -1,7 +1,11 @@
 const state = {
   documents: [],
   summary: null,
+  session: null,
   selectedId: null,
+  chatDocumentId: null,
+  chatOpen: false,
+  chatAbortController: null,
   loading: false,
 };
 
@@ -29,6 +33,15 @@ const elements = {
   selectedState: document.querySelector("#selectedState"),
   languageList: document.querySelector("#languageList"),
   toastStack: document.querySelector("#toastStack"),
+  aiChatToggle: document.querySelector("#aiChatToggle"),
+  aiChatPopup: document.querySelector("#aiChatPopup"),
+  aiChatClose: document.querySelector("#aiChatClose"),
+  aiChatState: document.querySelector("#aiChatState"),
+  aiChatDocumentSelect: document.querySelector("#aiChatDocumentSelect"),
+  aiChatMessages: document.querySelector("#aiChatMessages"),
+  aiChatForm: document.querySelector("#aiChatForm"),
+  aiChatInput: document.querySelector("#aiChatInput"),
+  aiChatSend: document.querySelector("#aiChatSend"),
 };
 
 function escapeHtml(value) {
@@ -60,6 +73,16 @@ function setTheme(theme) {
   elements.themeIcon.textContent = theme === "dark" ? "Sun" : "Moon";
 }
 
+class ApiError extends Error {
+  constructor(message, status, payload, retryAfter) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+    this.retryAfter = retryAfter;
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   if (response.status === 204) {
@@ -68,8 +91,9 @@ async function fetchJson(url, options = {}) {
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
-    const message = typeof payload === "string" ? payload : payload.detail || "Request failed";
-    throw new Error(message);
+    const detail = typeof payload === "string" ? payload : payload.detail || "Request failed";
+    const message = typeof detail === "string" ? detail : detail.message || "Request failed";
+    throw new ApiError(message, response.status, payload, response.headers.get("Retry-After"));
   }
   return payload;
 }
@@ -84,6 +108,95 @@ function showToast(message, type = "info", timeout = 3200) {
 
 function selectedDocument() {
   return state.documents.find((item) => item.id === state.selectedId) || null;
+}
+
+function processedDocuments() {
+  return state.documents.filter((item) => item.status === "processed");
+}
+
+function selectedChatDocument() {
+  return state.documents.find((item) => item.id === state.chatDocumentId && item.status === "processed") || null;
+}
+
+function sessionExpired() {
+  return state.session?.expires_at && new Date(state.session.expires_at).getTime() <= Date.now();
+}
+
+async function loadSession() {
+  state.session = await fetchJson("/api/session");
+  return state.session;
+}
+
+function chatStorageKey(documentId) {
+  return `document-console-chat:${state.session?.session_id || "anonymous"}:${documentId}`;
+}
+
+function readChatMessages(documentId) {
+  if (!documentId || !state.session || sessionExpired()) {
+    return [];
+  }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(chatStorageKey(documentId)) || "null");
+    if (!saved || saved.expires_at !== state.session.expires_at) {
+      return [];
+    }
+    return Array.isArray(saved.messages) ? saved.messages : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeChatMessages(documentId, messages) {
+  if (!documentId || !state.session) {
+    return;
+  }
+  sessionStorage.setItem(
+    chatStorageKey(documentId),
+    JSON.stringify({
+      expires_at: state.session.expires_at,
+      messages: messages.slice(-40),
+    }),
+  );
+}
+
+function clearSessionState(message = "Session expired, upload files again.") {
+  if (state.chatAbortController) {
+    state.chatAbortController.abort();
+    state.chatAbortController = null;
+  }
+  if (state.session?.session_id) {
+    const prefix = `document-console-chat:${state.session.session_id}:`;
+    Object.keys(sessionStorage)
+      .filter((key) => key.startsWith(prefix))
+      .forEach((key) => sessionStorage.removeItem(key));
+  }
+  state.documents = [];
+  state.summary = null;
+  state.session = null;
+  state.selectedId = null;
+  state.chatDocumentId = null;
+  render();
+  showToast(message, "error");
+}
+
+function handleApiError(error) {
+  if (error.status === 401 || error.status === 419) {
+    clearSessionState("Session expired, upload files again.");
+    return true;
+  }
+  if (error.status === 429) {
+    showToast(`Rate limit exceeded. Try again in ${error.retryAfter || "a few"} seconds.`, "error");
+    return true;
+  }
+  return false;
+}
+
+function errorMessage(error) {
+  const detail = error.payload?.detail;
+  if (detail && typeof detail === "object" && detail.used_bytes !== undefined) {
+    return `${detail.message || error.message}. Used ${formatBytes(detail.used_bytes)} of ${formatBytes(detail.quota_bytes)}.`;
+  }
+  return error.message;
 }
 
 function aiBadge(documentItem) {
@@ -230,10 +343,63 @@ function renderDetails() {
       : "Document must be analyzed first.");
 }
 
+function syncChatDocumentSelection() {
+  const processed = processedDocuments();
+  if (!processed.length) {
+    state.chatDocumentId = null;
+    return;
+  }
+  if (processed.some((item) => item.id === state.chatDocumentId)) {
+    return;
+  }
+  const selected = selectedDocument();
+  state.chatDocumentId = selected?.status === "processed" ? selected.id : processed[0].id;
+}
+
+function renderChat() {
+  elements.aiChatPopup.hidden = !state.chatOpen;
+  syncChatDocumentSelection();
+
+  const processed = processedDocuments();
+  elements.aiChatDocumentSelect.innerHTML = processed.length
+    ? processed
+        .map(
+          (item) =>
+            `<option value="${item.id}" ${item.id === state.chatDocumentId ? "selected" : ""}>#${item.id} ${escapeHtml(item.filename)}</option>`,
+        )
+        .join("")
+    : '<option value="">No processed documents</option>';
+
+  const chatDocument = selectedChatDocument();
+  const disabled = !chatDocument || state.loading;
+  elements.aiChatDocumentSelect.disabled = !processed.length;
+  elements.aiChatInput.disabled = disabled;
+  elements.aiChatSend.disabled = disabled;
+
+  if (!chatDocument) {
+    elements.aiChatState.textContent = "Analyze a document first.";
+    elements.aiChatMessages.innerHTML = '<div class="empty">Processed documents will appear here.</div>';
+    return;
+  }
+
+  const messages = readChatMessages(chatDocument.id);
+  elements.aiChatState.textContent = `Answering from #${chatDocument.id}`;
+  elements.aiChatMessages.innerHTML = messages.length
+    ? messages
+        .map(
+          (message) =>
+            `<div class="ai-chat-message ${escapeHtml(message.role)}">${escapeHtml(message.content)}</div>`,
+        )
+        .join("")
+    : '<div class="empty">Ask a question about the selected document.</div>';
+  elements.aiChatMessages.scrollTop = elements.aiChatMessages.scrollHeight;
+}
+
 function render() {
   renderMetrics();
   renderTable();
   renderDetails();
+  renderChat();
 }
 
 function setLoading(isLoading) {
@@ -254,6 +420,7 @@ async function loadData() {
   setLoading(true);
   renderSkeleton();
   try {
+    await loadSession();
     const [summary, documents] = await Promise.all([
       fetchJson("/api/dashboard/summary"),
       fetchJson("/api/documents"),
@@ -265,6 +432,9 @@ async function loadData() {
     }
     render();
   } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
     showToast(error.message, "error");
     elements.documentsBody.innerHTML = `<tr><td colspan="8" class="muted">Could not load data: ${escapeHtml(error.message)}</td></tr>`;
   } finally {
@@ -290,7 +460,10 @@ async function uploadSelectedFile(file) {
     showToast("Document uploaded.", "success");
     await loadData();
   } catch (error) {
-    showToast(error.message, "error");
+    if (handleApiError(error)) {
+      return;
+    }
+    showToast(errorMessage(error), "error");
   } finally {
     setLoading(false);
   }
@@ -304,6 +477,9 @@ async function analyzeDocument(documentId) {
     showToast(updated.status === "failed" ? "Analysis failed." : "Analysis completed.", updated.status === "failed" ? "error" : "success");
     await loadData();
   } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(false);
@@ -318,9 +494,71 @@ async function summarizeDocument(documentId) {
     showToast("AI summary generated.", "success");
     await loadData();
   } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(false);
+  }
+}
+
+async function askSelectedDocument(question) {
+  const chatDocument = selectedChatDocument();
+  const cleanQuestion = question.trim();
+  if (!chatDocument || !cleanQuestion) {
+    return;
+  }
+
+  if (state.chatAbortController) {
+    state.chatAbortController.abort();
+  }
+  const requestDocumentId = chatDocument.id;
+  const controller = new AbortController();
+  state.chatAbortController = controller;
+
+  const messages = readChatMessages(requestDocumentId);
+  const nextMessages = [...messages, { role: "user", content: cleanQuestion }];
+  writeChatMessages(requestDocumentId, nextMessages);
+  elements.aiChatInput.value = "";
+  renderChat();
+
+  try {
+    const payload = await fetchJson(`/api/documents/${requestDocumentId}/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: cleanQuestion,
+        history: messages.slice(-12),
+      }),
+      signal: controller.signal,
+    });
+    if (state.chatDocumentId !== requestDocumentId) {
+      return;
+    }
+    const updatedMessages = [
+      ...readChatMessages(requestDocumentId),
+      {
+        role: "assistant",
+        content: payload.truncated_context
+          ? `${payload.answer}\n\nNote: only the available extracted text was checked.`
+          : payload.answer,
+      },
+    ];
+    writeChatMessages(requestDocumentId, updatedMessages);
+    renderChat();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
+    if (handleApiError(error)) {
+      return;
+    }
+    showToast(error.message, "error");
+  } finally {
+    if (state.chatAbortController === controller) {
+      state.chatAbortController = null;
+    }
   }
 }
 
@@ -337,6 +575,9 @@ async function deleteDocument(documentId) {
     showToast("Document deleted.", "success");
     await loadData();
   } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
     showToast(error.message, "error");
   } finally {
     setLoading(false);
@@ -346,6 +587,36 @@ async function deleteDocument(documentId) {
 elements.themeToggle.addEventListener("click", () => {
   const current = document.documentElement.getAttribute("data-theme") || "dark";
   setTheme(current === "dark" ? "light" : "dark");
+});
+
+elements.aiChatToggle.addEventListener("click", () => {
+  state.chatOpen = !state.chatOpen;
+  if (state.chatOpen) {
+    syncChatDocumentSelection();
+  }
+  renderChat();
+  if (state.chatOpen) {
+    elements.aiChatInput.focus();
+  }
+});
+
+elements.aiChatClose.addEventListener("click", () => {
+  state.chatOpen = false;
+  renderChat();
+});
+
+elements.aiChatDocumentSelect.addEventListener("change", () => {
+  if (state.chatAbortController) {
+    state.chatAbortController.abort();
+    state.chatAbortController = null;
+  }
+  state.chatDocumentId = Number(elements.aiChatDocumentSelect.value) || null;
+  renderChat();
+});
+
+elements.aiChatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await askSelectedDocument(elements.aiChatInput.value);
 });
 
 elements.refreshButton.addEventListener("click", loadData);

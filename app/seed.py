@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import create_session, init_db
 from app.models.document import Document
+from app.models.session import UserSession
 from app.services.text_analysis import analyze_text
 
 SAMPLE_TEXT = (
@@ -29,8 +30,12 @@ def seed_demo_document(db: Session) -> bool:
     stored_file_path.write_text(SAMPLE_TEXT, encoding="utf-8")
 
     detected_language, word_count, char_count = analyze_text(SAMPLE_TEXT)
+    db_session = UserSession()
+    db.add(db_session)
+    db.flush()
     db.add(
         Document(
+            session_id=db_session.id,
             filename="sample-document.txt",
             stored_filename=stored_filename,
             stored_path=stored_filename,

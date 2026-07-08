@@ -1,4 +1,6 @@
+import asyncio
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -8,7 +10,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import create_session, init_db
+from app.crud.session import cleanup_expired_sessions
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,10 +19,26 @@ WEB_DIR = BASE_DIR / "web"
 WEB_INDEX = WEB_DIR / "index.html"
 
 
+async def cleanup_expired_sessions_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.session_cleanup_interval_seconds)
+        db = create_session()
+        try:
+            cleanup_expired_sessions(db)
+        finally:
+            db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db()
-    yield
+    cleanup_task = asyncio.create_task(cleanup_expired_sessions_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
 
 
 app = FastAPI(

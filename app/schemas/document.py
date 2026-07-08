@@ -8,6 +8,7 @@ DocumentStatus = Literal["uploaded", "processed", "failed"]
 
 class DocumentRead(BaseModel):
     id: int
+    session_id: str
     filename: str
     content_type: str
     size_bytes: int

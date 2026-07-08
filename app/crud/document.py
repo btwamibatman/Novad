@@ -1,20 +1,43 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
 
 
-def get_document(db: Session, document_id: int) -> Document | None:
-    return db.get(Document, document_id)
+def get_document(db: Session, document_id: int, session_id: str) -> Document | None:
+    return db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.session_id == session_id,
+        )
+    )
 
 
-def get_documents(db: Session) -> list[Document]:
-    return list(db.scalars(select(Document).order_by(Document.created_at.desc())).all())
+def get_documents(db: Session, session_id: str) -> list[Document]:
+    return list(
+        db.scalars(
+            select(Document)
+            .where(Document.session_id == session_id)
+            .order_by(Document.created_at.desc())
+        ).all()
+    )
+
+
+def get_session_storage_bytes(db: Session, session_id: str) -> int:
+    return int(
+        db.scalar(
+            select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
+                Document.session_id == session_id
+            )
+        )
+        or 0
+    )
 
 
 def create_document(
     db: Session,
     *,
+    session_id: str,
     filename: str,
     stored_filename: str,
     stored_path: str,
@@ -27,6 +50,7 @@ def create_document(
         stored_path=stored_path,
         content_type=content_type,
         size_bytes=size_bytes,
+        session_id=session_id,
         status="uploaded",
     )
     db.add(db_document)

@@ -122,6 +122,36 @@ def test_list_and_get_document(client, txt_document_id):
     assert response.json()["id"] == txt_document_id
 
 
+def test_documents_are_scoped_to_session(client, other_client, txt_document_id):
+    response = other_client.get("/api/documents")
+    assert response.status_code == 200
+    assert response.json() == []
+
+    response = other_client.get(f"/api/documents/{txt_document_id}")
+    assert response.status_code == 404
+
+
+def test_session_endpoint_creates_cookie(client):
+    response = client.get("/api/session")
+
+    assert response.status_code == 200
+    assert response.json()["session_id"]
+    assert response.json()["expires_at"]
+    assert "document_session" in response.cookies
+
+
+def test_upload_rejects_session_storage_quota(client, monkeypatch):
+    monkeypatch.setattr(settings, "session_storage_quota_bytes", 10)
+
+    response = client.post(
+        "/api/documents/upload",
+        files={"file": ("large.txt", b"this payload is too large", "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"]["message"] == "Session storage quota exceeded"
+
+
 def test_analyze_txt_document(client, txt_document_id):
     response = client.post(f"/api/documents/{txt_document_id}/analyze")
 
@@ -159,6 +189,84 @@ def test_summarize_processed_document(client, txt_document_id, monkeypatch):
     assert data["ai_summary"] == "Short AI summary for this document."
     assert data["ai_model"] == "test-gemini"
     assert data["ai_error"] is None
+
+
+def test_ask_requires_processed_document(client, txt_document_id):
+    response = client.post(
+        f"/api/documents/{txt_document_id}/ask",
+        json={"question": "What is this file about?", "history": []},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Document must be analyzed first"
+
+
+def test_ask_processed_document(client, txt_document_id, monkeypatch):
+    client.post(f"/api/documents/{txt_document_id}/analyze")
+
+    def fake_answer_document_question(text: str, question: str, history: list[dict[str, str]]):
+        assert "English text" in text
+        assert question == "What language is this?"
+        assert history == [{"role": "user", "content": "Previous question"}]
+        return "The document is in English.", "test-gemini", False
+
+    monkeypatch.setattr(
+        "app.api.routes.documents.ai_summary.answer_document_question",
+        fake_answer_document_question,
+    )
+
+    response = client.post(
+        f"/api/documents/{txt_document_id}/ask",
+        json={
+            "question": "What language is this?",
+            "history": [{"role": "user", "content": "Previous question"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "The document is in English.",
+        "model": "test-gemini",
+        "truncated_context": False,
+    }
+
+
+def test_ask_rejects_blank_question(client, txt_document_id):
+    client.post(f"/api/documents/{txt_document_id}/analyze")
+
+    response = client.post(
+        f"/api/documents/{txt_document_id}/ask",
+        json={"question": "   ", "history": []},
+    )
+
+    assert response.status_code == 422
+
+
+def test_ask_rate_limit_returns_retry_after(client, txt_document_id, monkeypatch):
+    client.post(f"/api/documents/{txt_document_id}/analyze")
+
+    def fake_answer_document_question(text: str, question: str, history: list[dict[str, str]]):
+        return "Answer.", "test-gemini", False
+
+    monkeypatch.setattr(
+        "app.api.routes.documents.ai_summary.answer_document_question",
+        fake_answer_document_question,
+    )
+
+    for _ in range(10):
+        response = client.post(
+            f"/api/documents/{txt_document_id}/ask",
+            json={"question": "What is this?", "history": []},
+        )
+        assert response.status_code == 200
+
+    response = client.post(
+        f"/api/documents/{txt_document_id}/ask",
+        json={"question": "What is this?", "history": []},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"]
 
 
 def test_analyze_pdf_with_text_layer(client):

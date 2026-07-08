@@ -54,6 +54,14 @@ def client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture()
+def other_client() -> Generator[TestClient, None, None]:
+    app.dependency_overrides[get_db] = override_get_db
+    test_client = TestClient(app)
+    yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
 def txt_document_id(client: TestClient) -> int:
     response = client.post(
         "/api/documents/upload",

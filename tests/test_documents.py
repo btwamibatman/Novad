@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from app.core.config import settings
@@ -41,6 +41,17 @@ def make_pdf_with_text(text: str) -> bytes:
 
 def make_pdf_without_text() -> bytes:
     writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def make_pdf_with_text_and_blank_page(text: str) -> bytes:
+    writer = PdfWriter()
+    text_reader = PdfReader(BytesIO(make_pdf_with_text(text)))
+    writer.add_page(text_reader.pages[0])
     writer.add_blank_page(width=612, height=792)
 
     output = BytesIO()
@@ -159,6 +170,7 @@ def test_analyze_txt_document(client, txt_document_id):
     data = response.json()
     assert data["status"] == "processed"
     assert data["detected_language"] == "en"
+    assert data["language_distribution"] == {"en": 1.0}
     assert data["word_count"] > 5
     assert "English text" in data["extracted_text"]
 
@@ -229,6 +241,38 @@ def test_ask_processed_document(client, txt_document_id, monkeypatch):
         "model": "test-gemini",
         "truncated_context": False,
     }
+
+
+def test_ask_processed_document_uses_relevant_chunk(client, monkeypatch):
+    early_text = "early section " * 220
+    late_text = "specialinvoiceend final amount is forty two. " * 40
+    upload = upload_txt(
+        client,
+        filename="long.txt",
+        content=f"{early_text}\n{late_text}".encode(),
+    )
+    assert upload.status_code == 201
+    document_id = upload.json()["id"]
+    client.post(f"/api/documents/{document_id}/analyze")
+
+    def fake_answer_document_question(text: str, question: str, history: list[dict[str, str]]):
+        assert "specialinvoiceend" in text
+        assert question == "What is the specialinvoiceend amount?"
+        assert history == []
+        return "The amount is forty two.", "test-gemini", False
+
+    monkeypatch.setattr(
+        "app.api.routes.documents.ai_summary.answer_document_question",
+        fake_answer_document_question,
+    )
+
+    response = client.post(
+        f"/api/documents/{document_id}/ask",
+        json={"question": "What is the specialinvoiceend amount?", "history": []},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "The amount is forty two."
 
 
 def test_ask_rejects_blank_question(client, txt_document_id):
@@ -307,6 +351,32 @@ def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypa
     data = response.json()
     assert data["status"] == "processed"
     assert "OCR fallback extracted English text" in data["extracted_text"]
+
+
+def test_analyze_pdf_uses_ocr_per_page_for_mixed_pdf(client, monkeypatch):
+    pdf_bytes = make_pdf_with_text_and_blank_page("First page has extractable English text.")
+    upload = client.post(
+        "/api/documents/upload",
+        files={"file": ("mixed.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload.status_code == 201
+    ocr_inputs = []
+
+    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
+        ocr_inputs.append(input_path)
+        output_path.write_bytes(make_pdf_with_text("Second page OCR English text."))
+        return 0
+
+    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "processed"
+    assert "First page has extractable English text" in data["extracted_text"]
+    assert "Second page OCR English text" in data["extracted_text"]
+    assert len(ocr_inputs) == 1
 
 
 def test_run_ocr_uses_configured_russian_kazakh_english_languages(tmp_path, monkeypatch):

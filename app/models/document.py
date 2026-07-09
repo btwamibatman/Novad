@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -22,6 +22,7 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     detected_language: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    language_distribution: Mapped[dict[str, float]] = mapped_column(JSON, default=dict, nullable=False)
     word_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

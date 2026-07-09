@@ -6,6 +6,7 @@ const state = {
   chatDocumentId: null,
   chatOpen: false,
   chatAbortController: null,
+  pendingAction: null,
   loading: false,
 };
 
@@ -65,6 +66,51 @@ function formatBytes(bytes) {
     unit += 1;
   }
   return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return String(value);
+  }
+  return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatLanguageDistribution(distribution) {
+  const entries = Object.entries(distribution || {}).filter(([, share]) => Number(share) > 0);
+  if (!entries.length) {
+    return "";
+  }
+  return entries
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([language, share]) => `${language} ${Math.round(Number(share) * 100)}%`)
+    .join(", ");
+}
+
+function documentLanguageLabel(documentItem) {
+  return formatLanguageDistribution(documentItem.language_distribution) || documentItem.detected_language || "-";
+}
+
+function isPendingAction(action, documentId = null) {
+  return (
+    state.pendingAction?.action === action &&
+    (documentId === null || state.pendingAction.documentId === documentId)
+  );
+}
+
+function actionButton(item, action, label, pendingLabel, extraClass = "", disabled = false) {
+  const pending = isPendingAction(action, item.id);
+  const className = ["button", "small", extraClass, pending ? "loading" : ""].filter(Boolean).join(" ");
+  return `
+    <button
+      class="${className}"
+      type="button"
+      data-action="${action}"
+      data-document-id="${item.id}"
+      ${pending ? 'aria-busy="true"' : ""}
+      ${disabled || state.loading ? "disabled" : ""}
+    >${pending ? pendingLabel : label}</button>
+  `;
 }
 
 function setTheme(theme) {
@@ -226,7 +272,7 @@ function renderMetrics() {
   }
   elements.languageList.innerHTML = entries
     .sort((a, b) => b[1] - a[1])
-    .map(([language, count]) => `<span class="badge processed">${escapeHtml(language)} ${count}</span>`)
+    .map(([language, count]) => `<span class="badge processed">${escapeHtml(language)} ${formatNumber(count)}</span>`)
     .join("");
 }
 
@@ -265,16 +311,16 @@ function renderTable() {
           <td>${escapeHtml(item.content_type)}</td>
           <td><span class="badge ${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
           <td>${formatBytes(item.size_bytes)}</td>
-          <td>${escapeHtml(item.detected_language || "-")}</td>
+          <td>${escapeHtml(documentLanguageLabel(item))}</td>
           <td>${item.word_count || 0}</td>
           <td>${aiBadge(item)}</td>
           <td>
             <div class="row-actions">
-              <button class="button small" type="button" data-action="select" data-document-id="${item.id}">Open</button>
-              <button class="button small" type="button" data-action="analyze" data-document-id="${item.id}">Analyze</button>
-              <button class="button small" type="button" data-action="summarize" data-document-id="${item.id}" ${item.status === "processed" ? "" : "disabled"}>Summarize</button>
-              <button class="button small" type="button" data-action="download" data-document-id="${item.id}">Download</button>
-              <button class="button danger small" type="button" data-action="delete" data-document-id="${item.id}">Delete</button>
+              ${actionButton(item, "select", "Open", "Opening...")}
+              ${actionButton(item, "analyze", "Analyze", "Analyzing...")}
+              ${actionButton(item, "summarize", "Summarize", "Summarizing...", "", item.status !== "processed")}
+              ${actionButton(item, "download", "Download", "Downloading...")}
+              ${actionButton(item, "delete", "Delete", "Deleting...", "danger")}
             </div>
           </td>
         </tr>
@@ -302,7 +348,7 @@ function renderDetails() {
       <div class="detail-row"><span class="detail-label">Status</span><span><span class="badge ${escapeHtml(documentItem.status)}">${escapeHtml(documentItem.status)}</span></span></div>
       <div class="detail-row"><span class="detail-label">Type</span><span>${escapeHtml(documentItem.content_type)}</span></div>
       <div class="detail-row"><span class="detail-label">Size</span><span>${formatBytes(documentItem.size_bytes)}</span></div>
-      <div class="detail-row"><span class="detail-label">Language</span><span>${escapeHtml(documentItem.detected_language || "-")}</span></div>
+      <div class="detail-row"><span class="detail-label">Language</span><span>${escapeHtml(documentLanguageLabel(documentItem))}</span></div>
       <div class="detail-row"><span class="detail-label">Words</span><span>${documentItem.word_count || 0}</span></div>
       <div class="detail-row"><span class="detail-label">Characters</span><span>${documentItem.char_count || 0}</span></div>
       <div class="detail-row"><span class="detail-label">AI</span><span>${aiBadge(documentItem)}</span></div>
@@ -406,7 +452,16 @@ function setLoading(isLoading) {
   state.loading = isLoading;
   elements.refreshButton.disabled = isLoading;
   elements.uploadButton.disabled = isLoading;
+  elements.uploadButton.classList.toggle("loading", isPendingAction("upload"));
+  elements.uploadButton.setAttribute("aria-busy", isPendingAction("upload") ? "true" : "false");
+  elements.uploadButton.textContent = isPendingAction("upload") ? "Uploading..." : "Upload document";
   elements.tableState.textContent = isLoading ? "Loading" : elements.tableState.textContent;
+}
+
+function setPendingAction(action, documentId = null) {
+  state.pendingAction = action ? { action, documentId } : null;
+  setLoading(Boolean(action));
+  render();
 }
 
 function renderSkeleton() {
@@ -449,7 +504,7 @@ async function uploadSelectedFile(file) {
   }
   const formData = new FormData();
   formData.append("file", file);
-  setLoading(true);
+  setPendingAction("upload");
   try {
     const created = await fetchJson("/api/documents/upload", {
       method: "POST",
@@ -465,12 +520,12 @@ async function uploadSelectedFile(file) {
     }
     showToast(errorMessage(error), "error");
   } finally {
-    setLoading(false);
+    setPendingAction(null);
   }
 }
 
 async function analyzeDocument(documentId) {
-  setLoading(true);
+  setPendingAction("analyze", documentId);
   try {
     const updated = await fetchJson(`/api/documents/${documentId}/analyze`, { method: "POST" });
     state.selectedId = updated.id;
@@ -482,12 +537,12 @@ async function analyzeDocument(documentId) {
     }
     showToast(error.message, "error");
   } finally {
-    setLoading(false);
+    setPendingAction(null);
   }
 }
 
 async function summarizeDocument(documentId) {
-  setLoading(true);
+  setPendingAction("summarize", documentId);
   try {
     const updated = await fetchJson(`/api/documents/${documentId}/summarize`, { method: "POST" });
     state.selectedId = updated.id;
@@ -499,7 +554,7 @@ async function summarizeDocument(documentId) {
     }
     showToast(error.message, "error");
   } finally {
-    setLoading(false);
+    setPendingAction(null);
   }
 }
 
@@ -566,7 +621,7 @@ async function deleteDocument(documentId) {
   if (!confirm("Delete this document and its stored file?")) {
     return;
   }
-  setLoading(true);
+  setPendingAction("delete", documentId);
   try {
     await fetchJson(`/api/documents/${documentId}`, { method: "DELETE" });
     if (state.selectedId === documentId) {
@@ -580,7 +635,7 @@ async function deleteDocument(documentId) {
     }
     showToast(error.message, "error");
   } finally {
-    setLoading(false);
+    setPendingAction(null);
   }
 }
 
@@ -651,6 +706,10 @@ elements.documentsBody.addEventListener("click", async (event) => {
       state.selectedId = Number(row.dataset.documentId);
       render();
     }
+    return;
+  }
+
+  if (state.loading) {
     return;
   }
 

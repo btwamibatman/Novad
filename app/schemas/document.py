@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 DocumentStatus = Literal["uploaded", "processed", "failed"]
 
@@ -15,6 +15,7 @@ class DocumentRead(BaseModel):
     status: DocumentStatus
     extracted_text: str
     detected_language: str | None
+    language_distribution: dict[str, float] = Field(default_factory=dict)
     word_count: int
     char_count: int
     error_message: str | None

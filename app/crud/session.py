@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
 from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
 from app.models.session import UserSession
 from app.models._utils import utc_now
 from app.services.file_storage import remove_stored_file
@@ -59,6 +60,11 @@ def cleanup_expired_sessions(db: DbSession) -> int:
     for stored_path in stored_paths:
         remove_stored_file(stored_path)
 
+    document_ids = list(
+        db.scalars(select(Document.id).where(Document.session_id.in_(expired_ids))).all()
+    )
+    if document_ids:
+        db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(document_ids)))
     db.execute(delete(Document).where(Document.session_id.in_(expired_ids)))
     db.execute(delete(UserSession).where(UserSession.id.in_(expired_ids)))
     db.commit()

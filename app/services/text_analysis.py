@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 import tempfile
 from pathlib import Path
 
 from langdetect import LangDetectException, detect
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 from app.core.config import settings
 from app.models.document import Document
@@ -14,25 +15,54 @@ from app.services.file_storage import resolve_stored_path
 WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 
+@dataclass(frozen=True)
+class ExtractedPage:
+    page_number: int | None
+    text: str
+    extraction_method: str
+
+
 class OCRExtractionError(ValueError):
     pass
 
 
 def extract_text(document: Document) -> str:
+    return "\n".join(page.text for page in extract_text_pages(document))
+
+
+def extract_text_pages(document: Document) -> list[ExtractedPage]:
     path = resolve_stored_path(document.stored_path)
     if document.content_type == "text/plain":
-        return path.read_text(encoding="utf-8", errors="replace")
+        return [
+            ExtractedPage(
+                page_number=None,
+                text=path.read_text(encoding="utf-8", errors="replace"),
+                extraction_method="txt",
+            )
+        ]
     if document.content_type == "application/pdf":
-        extracted_text = extract_pdf_text(path)
-        if has_enough_text_signal(extracted_text):
-            return extracted_text
-        return extract_pdf_text_with_ocr(path)
+        return extract_pdf_pages_with_ocr(path)
     raise ValueError("Unsupported content type")
 
 
 def extract_pdf_text(path: Path) -> str:
+    return join_page_text(extract_pdf_pages(path, extraction_method="pypdf"))
+
+
+def extract_pdf_pages(path: Path, *, extraction_method: str) -> list[ExtractedPage]:
     reader = PdfReader(str(path))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return [
+        ExtractedPage(
+            page_number=index,
+            text=page.extract_text() or "",
+            extraction_method=extraction_method,
+        )
+        for index, page in enumerate(reader.pages, start=1)
+    ]
+
+
+def join_page_text(pages: list[ExtractedPage]) -> str:
+    return "\n".join(page.text for page in pages)
 
 
 def has_enough_text_signal(text: str) -> bool:
@@ -51,10 +81,51 @@ def configured_ocr_languages() -> tuple[str, ...]:
 
 
 def extract_pdf_text_with_ocr(path: Path) -> str:
+    return join_page_text(extract_pdf_pages_with_ocr(path))
+
+
+def extract_pdf_pages_with_ocr(path: Path) -> list[ExtractedPage]:
+    extracted_pages: list[ExtractedPage] = []
+    reader = PdfReader(str(path))
+
+    for index, page in enumerate(reader.pages, start=1):
+        extracted_text = page.extract_text() or ""
+        if has_enough_text_signal(extracted_text):
+            extracted_pages.append(
+                ExtractedPage(
+                    page_number=index,
+                    text=extracted_text,
+                    extraction_method="pypdf",
+                )
+            )
+            continue
+
+        extracted_pages.append(
+            ExtractedPage(
+                page_number=index,
+                text=extract_single_pdf_page_with_ocr(page),
+                extraction_method="ocr",
+            )
+        )
+
+    if not has_enough_text_signal(join_page_text(extracted_pages)):
+        raise OCRExtractionError(
+            "OCR failed: no readable text was found after OCR. Try a clearer scan with better lighting."
+        )
+    return extracted_pages
+
+
+def extract_single_pdf_page_with_ocr(page) -> str:
     with tempfile.TemporaryDirectory() as temporary_dir:
+        input_pdf_path = Path(temporary_dir) / "input.pdf"
         ocr_pdf_path = Path(temporary_dir) / "ocr.pdf"
+        writer = PdfWriter()
+        writer.add_page(page)
+        with input_pdf_path.open("wb") as file:
+            writer.write(file)
+
         try:
-            exit_code = run_ocr(path, ocr_pdf_path)
+            exit_code = run_ocr(input_pdf_path, ocr_pdf_path)
         except ImportError as error:
             raise OCRExtractionError("OCR failed: OCRmyPDF is not installed in this environment") from error
         except Exception as error:
@@ -62,12 +133,8 @@ def extract_pdf_text_with_ocr(path: Path) -> str:
         if exit_code:
             raise OCRExtractionError(f"OCR failed: OCR engine exited with code {exit_code}")
 
-        extracted_text = extract_pdf_text(ocr_pdf_path)
-        if not has_enough_text_signal(extracted_text):
-            raise OCRExtractionError(
-                "OCR failed: no readable text was found after OCR. Try a clearer scan with better lighting."
-            )
-        return extracted_text
+        extracted_pages = extract_pdf_pages(ocr_pdf_path, extraction_method="ocr")
+        return join_page_text(extracted_pages)
 
 
 def run_ocr(input_path: Path, output_path: Path) -> int:

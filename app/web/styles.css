@@ -135,6 +135,16 @@ button {
   opacity: 0.55;
 }
 
+.button.loading::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
 .button.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -571,6 +581,12 @@ tr[data-selected="true"] {
 @keyframes shimmer {
   to {
     transform: translateX(100%);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

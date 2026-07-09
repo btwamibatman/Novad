@@ -37,21 +37,25 @@ def read_dashboard_summary(
         )
     ).one()
 
-    language_rows = db.execute(
-        select(Document.detected_language, func.count(Document.id))
+    language_distributions = db.scalars(
+        select(Document.language_distribution)
         .where(
             Document.session_id == current_session.id,
-            Document.detected_language.is_not(None),
+            Document.status == "processed",
         )
-        .group_by(Document.detected_language)
     ).all()
+
+    detected_languages: dict[str, float] = {}
+    for distribution in language_distributions:
+        if not isinstance(distribution, dict):
+            continue
+        for language, share in distribution.items():
+            detected_languages[language] = round(detected_languages.get(language, 0.0) + float(share), 4)
 
     return DashboardSummary(
         total_documents=row.total_documents or 0,
         processed_documents=row.processed_documents or 0,
         failed_documents=row.failed_documents or 0,
         storage_bytes=row.storage_bytes or 0,
-        detected_languages={
-            language: count for language, count in language_rows if language is not None
-        },
+        detected_languages=detected_languages,
     )

@@ -14,7 +14,14 @@ from app.schemas.document import DocumentRead
 from app.services.file_storage import remove_stored_file, resolve_stored_path, save_upload
 from app.services.rate_limit import enforce_rate_limit
 from app.services import ai_summary
-from app.services.text_analysis import analyze_text, extract_text
+from app.services.document_chunks import (
+    build_document_chunks,
+    format_chunks_for_context,
+    language_distribution,
+    primary_language,
+    select_relevant_chunks,
+)
+from app.services.text_analysis import analyze_text, extract_text_pages, join_page_text
 
 router = APIRouter()
 
@@ -79,25 +86,34 @@ def analyze_document(
 ) -> Document:
     db_document = get_document_or_404(db, document_id, current_session.id)
     try:
-        extracted_text = extract_text(db_document)
-        detected_language, word_count, char_count = analyze_text(extracted_text)
+        extracted_pages = extract_text_pages(db_document)
+        extracted_text = join_page_text(extracted_pages).strip()
+        _, word_count, char_count = analyze_text(extracted_text)
+        chunks = build_document_chunks(extracted_pages)
+        distribution = language_distribution(chunks)
+        detected_language = primary_language(distribution)
     except Exception as error:
         return document_crud.update_document_analysis(
             db,
             db_document,
             status="failed",
+            extracted_text="",
+            language_distribution={},
             error_message=str(error),
+            chunks=[],
         )
 
     return document_crud.update_document_analysis(
         db,
         db_document,
         status="processed",
-        extracted_text=extracted_text.strip(),
+        extracted_text=extracted_text,
         detected_language=detected_language,
+        language_distribution=distribution,
         word_count=word_count,
         char_count=char_count,
         error_message=None,
+        chunks=chunks,
     )
 
 
@@ -115,10 +131,12 @@ async def summarize_document(
             detail="Document must be analyzed first",
         )
 
+    chunks = document_crud.get_document_chunks(db, db_document.id)
+    chunk_texts = [chunk.text for chunk in chunks] or [db_document.extracted_text]
     try:
         summary, model_name = await run_in_threadpool(
-            ai_summary.summarize_text,
-            db_document.extracted_text,
+            ai_summary.summarize_chunks,
+            chunk_texts,
         )
     except ai_summary.AISummaryNotConfigured as error:
         document_crud.update_document_summary(
@@ -181,11 +199,14 @@ async def ask_document_question(
             detail="Document must be analyzed first",
         )
 
+    chunks = document_crud.get_document_chunks(db, db_document.id)
+    relevant_chunks = select_relevant_chunks(chunks, payload.question)
+    selected_context = format_chunks_for_context(relevant_chunks) or db_document.extracted_text
     history = [message.model_dump() for message in payload.history[-12:]]
     try:
         answer, model_name, truncated_context = await run_in_threadpool(
             ai_summary.answer_document_question,
-            db_document.extracted_text,
+            selected_context,
             payload.question,
             history,
         )

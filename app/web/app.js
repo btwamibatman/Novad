@@ -499,7 +499,7 @@ async function loadData() {
 
 async function uploadSelectedFile(file) {
   if (!file) {
-    showToast("Choose a PDF or TXT file first.", "error");
+    showToast("Choose a PDF, TXT or DOCX file first.", "error");
     return;
   }
   const formData = new FormData();

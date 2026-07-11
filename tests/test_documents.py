@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+from docx import Document as DocxDocument
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -56,6 +57,21 @@ def make_pdf_with_text_and_blank_page(text: str) -> bytes:
 
     output = BytesIO()
     writer.write(output)
+    return output.getvalue()
+
+
+def make_docx_with_text_and_table() -> bytes:
+    document = DocxDocument()
+    document.add_paragraph("DOCX introduction with enough English text for analysis.")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Task"
+    table.cell(0, 1).text = "Status"
+    table.cell(1, 0).text = "Prepare report"
+    table.cell(1, 1).text = "Completed"
+    document.add_paragraph("DOCX conclusion appears after the table.")
+
+    output = BytesIO()
+    document.save(output)
     return output.getvalue()
 
 
@@ -173,6 +189,57 @@ def test_analyze_txt_document(client, txt_document_id):
     assert data["language_distribution"] == {"en": 1.0}
     assert data["word_count"] > 5
     assert "English text" in data["extracted_text"]
+
+
+def test_upload_and_analyze_docx_document(client):
+    upload = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "sample.docx",
+                make_docx_with_text_and_table(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert upload.status_code == 201
+    assert upload.json()["content_type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "processed"
+    assert data["detected_language"] == "en"
+    assert data["error_message"] is None
+    assert data["extracted_text"].index("DOCX introduction") < data["extracted_text"].index("Task\tStatus")
+    assert data["extracted_text"].index("Task\tStatus") < data["extracted_text"].index("DOCX conclusion")
+
+
+def test_analyze_corrupted_docx_reports_readable_error(client):
+    upload = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "broken.docx",
+                b"not a valid DOCX package",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert upload.status_code == 201
+
+    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["extracted_text"] == ""
+    assert data["error_message"] == "DOCX extraction failed: file is invalid or corrupted"
 
 
 def test_summarize_requires_processed_document(client, txt_document_id):

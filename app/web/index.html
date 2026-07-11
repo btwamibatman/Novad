@@ -105,16 +105,16 @@
           <article class="panel">
             <div class="panel-head">
               <h2 class="panel-title">Upload</h2>
-              <span class="muted">PDF or TXT</span>
+              <span class="muted">PDF, TXT or DOCX</span>
             </div>
             <div class="panel-body">
               <form id="uploadForm">
                 <div class="upload-zone" id="dropZone">
                   <div>
                     <p class="upload-title">Add a document</p>
-                    <p class="upload-copy">Drop a PDF/TXT file here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
+                    <p class="upload-copy">Drop a PDF, TXT or DOCX file here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
                   </div>
-                  <input class="field" id="fileInput" type="file" accept=".pdf,.txt,application/pdf,text/plain" required />
+                  <input class="field" id="fileInput" type="file" accept=".pdf,.txt,.docx,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
                   <button class="button primary" type="submit" id="uploadButton">Upload document</button>
                 </div>
               </form>

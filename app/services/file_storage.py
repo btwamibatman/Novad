@@ -10,6 +10,7 @@ from app.core.config import settings
 CONTENT_TYPES_BY_EXTENSION = {
     ".pdf": "application/pdf",
     ".txt": "text/plain",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 
@@ -28,7 +29,7 @@ def resolve_content_type(filename: str, content_type: str | None) -> str:
     if expected_type is None:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only PDF and TXT files are supported",
+            detail="Only PDF, TXT, and DOCX files are supported",
         )
     normalized_type = "" if content_type is None else content_type.split(";")[0].strip()
     if normalized_type in {"", "application/octet-stream", expected_type}:

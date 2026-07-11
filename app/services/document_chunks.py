@@ -156,6 +156,6 @@ def select_relevant_chunks(
 def format_chunks_for_context(chunks: Iterable[ChunkLike]) -> str:
     parts = []
     for chunk in chunks:
-        page = f"page {chunk.page_number}" if chunk.page_number is not None else "text file"
+        page = f"page {chunk.page_number}" if chunk.page_number is not None else "document"
         parts.append(f"[chunk {chunk.chunk_index}, {page}]\n{chunk.text.strip()}")
     return "\n\n".join(parts)

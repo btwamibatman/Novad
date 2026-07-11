@@ -5,6 +5,9 @@ import re
 import tempfile
 from pathlib import Path
 
+from docx import Document as DocxDocument
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from langdetect import LangDetectException, detect
 from pypdf import PdfReader, PdfWriter
 
@@ -42,7 +45,40 @@ def extract_text_pages(document: Document) -> list[ExtractedPage]:
         ]
     if document.content_type == "application/pdf":
         return extract_pdf_pages_with_ocr(path)
+    if document.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return [
+            ExtractedPage(
+                page_number=None,
+                text=extract_docx_text(path),
+                extraction_method="docx",
+            )
+        ]
     raise ValueError("Unsupported content type")
+
+
+def extract_docx_text(path: Path) -> str:
+    try:
+        document = DocxDocument(str(path))
+        blocks: list[str] = []
+
+        for block in document.iter_inner_content():
+            if isinstance(block, Paragraph):
+                text = block.text.strip()
+            elif isinstance(block, Table):
+                rows = [
+                    "\t".join(cell.text.strip() for cell in row.cells)
+                    for row in block.rows
+                ]
+                text = "\n".join(row for row in rows if row.strip())
+            else:
+                continue
+
+            if text:
+                blocks.append(text)
+    except Exception as error:
+        raise ValueError("DOCX extraction failed: file is invalid or corrupted") from error
+
+    return "\n\n".join(blocks)
 
 
 def extract_pdf_text(path: Path) -> str:

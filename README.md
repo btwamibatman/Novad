@@ -1,6 +1,6 @@
 # Document Processing API
 
-Document Processing API is a FastAPI backend for uploading documents, storing metadata in PostgreSQL, extracting text from TXT/PDF files, generating AI summaries, and exposing basic text analysis metrics.
+Document Processing API is a FastAPI backend for uploading PDF documents, extracting native or OCR text, generating AI summaries, reviewing content quality, and performing an advisory visual layout review.
 
 The project is designed for industrial practice reporting and uses only demo/local data.
 
@@ -13,19 +13,22 @@ The project is designed for industrial practice reporting and uses only demo/loc
 - PostgreSQL
 - Docker and Docker Compose
 - pytest
-- pypdf and langdetect
-- Google Gemini API for AI summaries
+- pypdf, OCRmyPDF, Tesseract, PyMuPDF and langdetect
+- Google Gemini API through the `google-genai` SDK
 - Uvicorn
 
 ## Features
 
 - Health check endpoint
-- PDF/TXT document upload
+- PDF-only document upload
 - Local file storage with PostgreSQL metadata
 - Document list/detail/download/delete endpoints
-- Text extraction from TXT files and PDF text layers
+- Per-page PDF text extraction with one batch OCR fallback for weak pages
+- Persisted extraction-quality gate with manual-review warnings for OCR pages
 - Language detection, word count and character count
 - AI summary generation after text analysis
+- Quick representative or thorough chunked content-quality review
+- Ephemeral visual review of selected PDF pages under general RK document rules
 - Dashboard summary endpoint
 - Static Document Console at `/`
 - Swagger UI at `/docs`
@@ -75,6 +78,12 @@ Run the API and PostgreSQL:
 docker compose up --build
 ```
 
+For an existing database, apply the Alembic migration after rebuilding:
+
+```bash
+docker compose exec api alembic upgrade head
+```
+
 Open:
 
 - Document Console: `http://localhost:8000`
@@ -101,7 +110,7 @@ uvicorn app.main:app --reload
 
 ## Seed Data
 
-Create one processed sample text document:
+Create one processed sample PDF document:
 
 ```bash
 docker compose exec api python -m app.seed
@@ -135,11 +144,14 @@ pytest
 | --- | --- | --- |
 | GET | `/health` | API health check |
 | GET | `/api/dashboard/summary` | Document metrics summary |
-| POST | `/api/documents/upload` | Upload PDF/TXT document |
+| POST | `/api/documents/upload` | Upload a PDF document |
 | GET | `/api/documents` | List documents |
 | GET | `/api/documents/{document_id}` | Get one document |
 | POST | `/api/documents/{document_id}/analyze` | Extract text and compute metrics |
 | POST | `/api/documents/{document_id}/summarize` | Generate AI summary for a processed document |
+| POST | `/api/documents/{document_id}/content-review` | Review extracted text in `quick` or `thorough` mode |
+| POST | `/api/documents/{document_id}/layout-review` | Review selected PDF pages visually |
+| POST | `/api/documents/{document_id}/ask` | Ask a question using relevant extracted chunks |
 | GET | `/api/documents/{document_id}/download` | Download stored file |
 | DELETE | `/api/documents/{document_id}` | Delete metadata and stored file |
 
@@ -149,16 +161,19 @@ pytest
 
 - `filename`: original uploaded filename
 - `stored_path`: stored file identifier resolved through `STORAGE_DIR`
-- `content_type`: `text/plain` or `application/pdf`
+- `content_type`: `application/pdf`
 - `size_bytes`: uploaded file size
 - `status`: `uploaded`, `processed` or `failed`
 - `extracted_text`: text extracted during analysis
+- `extraction_quality`, `extraction_quality_meta`: heuristic quality level and manual-review details
 - `detected_language`: language detected from extracted text
 - `word_count` and `char_count`: text metrics
 - `error_message`: analysis error details for failed documents
 - `ai_summary`: generated document summary
 - `ai_model`: AI model used for summary generation
 - `ai_error`: AI summary error details when generation fails
+- `content_review`, `content_review_model`, `content_review_error`, `content_review_mode`, `content_review_meta`: content-quality review state
+- `layout_review`, `layout_review_model`, `layout_review_error`, `layout_review_meta`: visual review state
 
 Files are stored in `storage/uploads`. PostgreSQL stores metadata and analysis results only.
 
@@ -166,8 +181,20 @@ Files are stored in `storage/uploads`. PostgreSQL stores metadata and analysis r
 
 `POST /api/documents/{document_id}/summarize` requires a processed document. If the document was not analyzed first, the API returns `400` with `Document must be analyzed first`.
 
-Set `GEMINI_API_KEY` in `.env` to enable real Gemini summary generation. Keep the key local and do not commit it.
+Set `GEMINI_API_KEY` in `.env` to enable Gemini. `AI_PROVIDER=gemini` is the current provider; the service boundary is intentionally provider-neutral so a local provider can be added in a later phase. `GEMINI_THINKING_BUDGET=0` keeps Gemini 2.5 Flash latency and output-token use predictable for the free tier; raise it deliberately if deeper reasoning is worth the quota. Keep the key local and do not commit it.
+
+`quick` content review makes one representative text request. `thorough` review checks up to six consecutive batches and reduces the findings (at most seven Gemini calls per operation by default); oversized documents are rejected by the synchronous batch limit until background jobs are introduced.
+
+Layout review renders at most `LAYOUT_REVIEW_MAX_PAGES` pages in memory. It starts at `LAYOUT_REVIEW_DPI` and can reduce the effective resolution down to `LAYOUT_REVIEW_MIN_DPI` when unusual PDF page boxes would exceed the per-page pixel guard. PNG files are never persisted and do not count toward session storage quota.
+
+## Privacy and Review Scope
+
+This project is intended for demo/local data. With Gemini, extracted text and rendered page images are sent to an external Google API. Page images may contain signatures, stamps, photographs and other visual personal data. Google currently marks free-tier Gemini content as eligible for product improvement. Do not use a free-tier key for confidential or production documents without an approved data-processing policy and provider terms review.
+
+The visual result is advisory. It uses the general document rules established by [RK Order No. 236](https://adilet.zan.kz/rus/docs/V2300033339) as a baseline, but it does not certify legal compliance and cannot authenticate signatures, stamps, logos or coats of arms. Content review checks internal consistency only; it does not perform external fact-checking or plagiarism detection.
 
 ## Limitations
 
-This v1 reads TXT files and PDF files with an existing text layer. Image-only PDFs require OCR and are intentionally left as a future improvement.
+- AI calls are synchronous in this phase. Background jobs are deferred to the local-AI phase.
+- OCR quality depends on scan quality and installed `rus+kaz+eng` Tesseract language data. The quality gate is heuristic: every OCR page remains advisory and requires manual verification of names, dates and identifiers.
+- Visual review checks selected pages by default, so it cannot prove that an element is absent from unreviewed pages.

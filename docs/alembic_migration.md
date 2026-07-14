@@ -10,8 +10,9 @@ metadata from `app.core.database.Base`.
 alembic upgrade head
 ```
 
-The first migration adds browser sessions and links documents to a session.
-Existing documents are assigned to a generated legacy session during upgrade.
+The migration chain adds browser sessions, document chunks, content/layout review
+fields and extraction-quality metadata. Existing documents are preserved and assigned
+to a generated legacy session during the first upgrade.
 
 ## Create a new migration
 

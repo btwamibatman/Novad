@@ -20,9 +20,17 @@ const elements = {
   searchInput: document.querySelector("#searchInput"),
   statusFilter: document.querySelector("#statusFilter"),
   analysisPreview: document.querySelector("#analysisPreview"),
+  analysisQualityNotice: document.querySelector("#analysisQualityNotice"),
   previewState: document.querySelector("#previewState"),
   summaryPreview: document.querySelector("#summaryPreview"),
   summaryState: document.querySelector("#summaryState"),
+  contentReviewPreview: document.querySelector("#contentReviewPreview"),
+  contentReviewState: document.querySelector("#contentReviewState"),
+  contentReviewMode: document.querySelector("#contentReviewMode"),
+  contentReviewButton: document.querySelector("#contentReviewButton"),
+  layoutReviewPreview: document.querySelector("#layoutReviewPreview"),
+  layoutReviewState: document.querySelector("#layoutReviewState"),
+  layoutReviewButton: document.querySelector("#layoutReviewButton"),
   uploadForm: document.querySelector("#uploadForm"),
   fileInput: document.querySelector("#fileInput"),
   dropZone: document.querySelector("#dropZone"),
@@ -74,6 +82,16 @@ function formatNumber(value) {
     return String(value);
   }
   return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function extractionQualityWarning(documentItem) {
+  const meta = documentItem?.extraction_quality_meta || {};
+  if (!meta.requires_manual_review) {
+    return "";
+  }
+  const pages = (meta.manual_review_pages || []).filter((page) => page != null);
+  const pageLabel = pages.length ? ` Pages to verify: ${pages.join(", ")}.` : "";
+  return `OCR quality: ${documentItem.extraction_quality || "unknown"}. Extracted text is advisory; verify names, dates and identifiers against the PDF image.${pageLabel}`;
 }
 
 function formatLanguageDistribution(distribution) {
@@ -246,10 +264,10 @@ function errorMessage(error) {
 }
 
 function aiBadge(documentItem) {
-  if (documentItem.ai_error) {
+  if (documentItem.ai_error || documentItem.content_review_error || documentItem.layout_review_error) {
     return '<span class="badge failed">error</span>';
   }
-  if (documentItem.ai_summary) {
+  if (documentItem.ai_summary || documentItem.content_review || documentItem.layout_review) {
     return '<span class="badge processed">ready</span>';
   }
   return '<span class="badge uploaded">none</span>';
@@ -289,7 +307,8 @@ function renderTable() {
       [item.filename, item.content_type, item.detected_language, item.status]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query)) ||
-      String(item.ai_summary || "").toLowerCase().includes(query),
+      [item.ai_summary, item.content_review, item.layout_review]
+        .some((value) => String(value || "").toLowerCase().includes(query)),
     );
   }
 
@@ -336,8 +355,16 @@ function renderDetails() {
     elements.detailsPanel.innerHTML = '<div class="empty">Select a document from the table.</div>';
     elements.previewState.textContent = "No document selected";
     elements.analysisPreview.textContent = "Select a processed document to inspect extracted text.";
+    elements.analysisQualityNotice.hidden = true;
+    elements.analysisQualityNotice.textContent = "";
     elements.summaryState.textContent = "No document selected";
     elements.summaryPreview.textContent = "Analyze a document before generating an AI summary.";
+    elements.contentReviewState.textContent = "No document selected";
+    elements.contentReviewPreview.textContent = "Analyze a document before reviewing its content.";
+    elements.contentReviewButton.disabled = true;
+    elements.layoutReviewState.textContent = "No document selected";
+    elements.layoutReviewPreview.textContent = "Select a PDF document to review its visual layout.";
+    elements.layoutReviewButton.disabled = true;
     return;
   }
 
@@ -351,6 +378,11 @@ function renderDetails() {
       <div class="detail-row"><span class="detail-label">Language</span><span>${escapeHtml(documentLanguageLabel(documentItem))}</span></div>
       <div class="detail-row"><span class="detail-label">Words</span><span>${documentItem.word_count || 0}</span></div>
       <div class="detail-row"><span class="detail-label">Characters</span><span>${documentItem.char_count || 0}</span></div>
+      ${
+        documentItem.status === "processed"
+          ? `<div class="detail-row"><span class="detail-label">Text quality</span><span>${escapeHtml(documentItem.extraction_quality || "unknown")}</span></div>`
+          : ""
+      }
       <div class="detail-row"><span class="detail-label">AI</span><span>${aiBadge(documentItem)}</span></div>
       ${
         documentItem.ai_model
@@ -368,10 +400,23 @@ function renderDetails() {
           ? `<div class="detail-row"><span class="detail-label">AI error</span><span>${escapeHtml(documentItem.ai_error)}</span></div>`
           : ""
       }
+      ${
+        documentItem.content_review_error
+          ? `<div class="detail-row"><span class="detail-label">Content review</span><span>${escapeHtml(documentItem.content_review_error)}</span></div>`
+          : ""
+      }
+      ${
+        documentItem.layout_review_error
+          ? `<div class="detail-row"><span class="detail-label">Layout review</span><span>${escapeHtml(documentItem.layout_review_error)}</span></div>`
+          : ""
+      }
     </div>
   `;
 
   elements.previewState.textContent = documentItem.status === "processed" ? "Extracted text" : documentItem.status;
+  const qualityWarning = extractionQualityWarning(documentItem);
+  elements.analysisQualityNotice.hidden = !qualityWarning;
+  elements.analysisQualityNotice.textContent = qualityWarning;
   elements.analysisPreview.textContent =
     documentItem.extracted_text || "Run analysis to extract text and compute document metrics.";
   elements.summaryState.textContent = documentItem.ai_error
@@ -381,12 +426,60 @@ function renderDetails() {
       : documentItem.status === "processed"
         ? "Ready"
         : "Analyze first";
-  elements.summaryPreview.textContent =
+  const summaryText =
     documentItem.ai_summary ||
     documentItem.ai_error ||
     (documentItem.status === "processed"
       ? "AI summary has not been generated for this document."
       : "Document must be analyzed first.");
+  elements.summaryPreview.textContent = qualityWarning
+    ? `${qualityWarning}\n\n${summaryText}`
+    : summaryText;
+
+  const contentMeta = documentItem.content_review_meta || {};
+  const contentPending = isPendingAction("content-review", documentItem.id);
+  elements.contentReviewButton.disabled = documentItem.status !== "processed" || state.loading;
+  elements.contentReviewButton.classList.toggle("loading", contentPending);
+  elements.contentReviewButton.setAttribute("aria-busy", contentPending ? "true" : "false");
+  elements.contentReviewButton.textContent = contentPending ? "Reviewing..." : "Review content";
+  elements.contentReviewMode.disabled = state.loading;
+  elements.contentReviewState.textContent = documentItem.content_review_error
+    ? "Error"
+    : documentItem.content_review
+      ? `${documentItem.content_review_mode || "review"} · ${contentMeta.complete ? "full" : "sample"}${contentMeta.batch_count ? ` · ${contentMeta.batch_count} call batch(es)` : ""}`
+      : documentItem.status === "processed"
+        ? "Ready"
+        : "Analyze first";
+  const contentReviewText =
+    documentItem.content_review ||
+    documentItem.content_review_error ||
+    (documentItem.status === "processed"
+      ? "Choose a review depth and start the content quality review."
+      : "Document must be analyzed first.");
+  elements.contentReviewPreview.textContent = qualityWarning
+    ? `${qualityWarning}\n\n${contentReviewText}`
+    : contentReviewText;
+
+  const isPdf = documentItem.content_type === "application/pdf";
+  const layoutMeta = documentItem.layout_review_meta || {};
+  const layoutPending = isPendingAction("layout-review", documentItem.id);
+  elements.layoutReviewButton.disabled = !isPdf || state.loading;
+  elements.layoutReviewButton.classList.toggle("loading", layoutPending);
+  elements.layoutReviewButton.setAttribute("aria-busy", layoutPending ? "true" : "false");
+  elements.layoutReviewButton.textContent = layoutPending ? "Reviewing..." : "Review layout visually";
+  elements.layoutReviewState.textContent = documentItem.layout_review_error
+    ? "Error"
+    : documentItem.layout_review
+      ? `pages ${(layoutMeta.reviewed_pages || []).join(", ") || "reviewed"} · ${layoutMeta.complete ? "full" : "sample"}`
+      : isPdf
+        ? "Ready"
+        : "PDF only";
+  elements.layoutReviewPreview.textContent =
+    documentItem.layout_review ||
+    documentItem.layout_review_error ||
+    (isPdf
+      ? "Start an advisory visual review of selected PDF pages."
+      : "Visual layout review is available only for PDF documents.");
 }
 
 function syncChatDocumentSelection() {
@@ -455,6 +548,10 @@ function setLoading(isLoading) {
   elements.uploadButton.classList.toggle("loading", isPendingAction("upload"));
   elements.uploadButton.setAttribute("aria-busy", isPendingAction("upload") ? "true" : "false");
   elements.uploadButton.textContent = isPendingAction("upload") ? "Uploading..." : "Upload document";
+  elements.contentReviewButton.disabled = isLoading || selectedDocument()?.status !== "processed";
+  elements.contentReviewMode.disabled = isLoading;
+  elements.layoutReviewButton.disabled =
+    isLoading || selectedDocument()?.content_type !== "application/pdf";
   elements.tableState.textContent = isLoading ? "Loading" : elements.tableState.textContent;
 }
 
@@ -499,7 +596,11 @@ async function loadData() {
 
 async function uploadSelectedFile(file) {
   if (!file) {
-    showToast("Choose a PDF, TXT or DOCX file first.", "error");
+    showToast("Choose a PDF file first.", "error");
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".pdf")) {
+    showToast("Only PDF files are supported.", "error");
     return;
   }
   const formData = new FormData();
@@ -553,6 +654,48 @@ async function summarizeDocument(documentId) {
       return;
     }
     showToast(error.message, "error");
+  } finally {
+    setPendingAction(null);
+  }
+}
+
+async function reviewDocumentContent(documentId) {
+  setPendingAction("content-review", documentId);
+  try {
+    const updated = await fetchJson(`/api/documents/${documentId}/content-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: elements.contentReviewMode.value }),
+    });
+    state.selectedId = updated.id;
+    showToast("Content quality review completed.", "success");
+    await loadData();
+  } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
+    showToast(errorMessage(error), "error");
+    await loadData();
+  } finally {
+    setPendingAction(null);
+  }
+}
+
+async function reviewDocumentLayout(documentId) {
+  setPendingAction("layout-review", documentId);
+  try {
+    const updated = await fetchJson(`/api/documents/${documentId}/layout-review`, {
+      method: "POST",
+    });
+    state.selectedId = updated.id;
+    showToast("Visual layout review completed.", "success");
+    await loadData();
+  } catch (error) {
+    if (handleApiError(error)) {
+      return;
+    }
+    showToast(errorMessage(error), "error");
+    await loadData();
   } finally {
     setPendingAction(null);
   }
@@ -677,6 +820,18 @@ elements.aiChatForm.addEventListener("submit", async (event) => {
 elements.refreshButton.addEventListener("click", loadData);
 elements.searchInput.addEventListener("input", renderTable);
 elements.statusFilter.addEventListener("change", renderTable);
+elements.contentReviewButton.addEventListener("click", async () => {
+  const documentItem = selectedDocument();
+  if (documentItem) {
+    await reviewDocumentContent(documentItem.id);
+  }
+});
+elements.layoutReviewButton.addEventListener("click", async () => {
+  const documentItem = selectedDocument();
+  if (documentItem) {
+    await reviewDocumentLayout(documentItem.id);
+  }
+});
 
 elements.uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();

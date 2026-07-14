@@ -415,6 +415,10 @@ tr[data-selected="true"] {
   line-height: 1.45;
 }
 
+.notice[hidden] {
+  display: none;
+}
+
 .empty {
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -427,6 +431,17 @@ tr[data-selected="true"] {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.review-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.review-controls .select {
+  max-width: 320px;
 }
 
 .ai-chat-toggle {
@@ -614,9 +629,19 @@ tr[data-selected="true"] {
   }
 
   .actions,
-  .filters {
+  .filters,
+  .review-controls {
     width: 100%;
     grid-template-columns: 1fr;
+  }
+
+  .review-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-controls .select {
+    max-width: none;
   }
 
   .button {

@@ -83,6 +83,7 @@
               <span class="muted" id="previewState">No document selected</span>
             </div>
             <div class="panel-body">
+              <div class="notice" id="analysisQualityNotice" hidden></div>
               <div class="preview" id="analysisPreview">Select a processed document to inspect extracted text.</div>
             </div>
           </article>
@@ -94,9 +95,45 @@
             </div>
             <div class="panel-body">
               <div class="notice">
-                OCR and AI checks use extracted text only. Margins, fonts, real signatures and stamps are not verified from the original PDF image.
+                The summary uses extracted text only. Content quality and visual layout are reviewed separately below.
               </div>
               <div class="preview" id="summaryPreview">Analyze a document before generating an AI summary.</div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">Content Quality Review</h2>
+              <span class="muted" id="contentReviewState">No document selected</span>
+            </div>
+            <div class="panel-body">
+              <div class="notice">
+                Uses extracted text to check spelling, punctuation, grammar, official style, logic and internal factual consistency. Possible OCR artifacts are reported separately; external facts and plagiarism are not checked.
+              </div>
+              <div class="review-controls">
+                <select class="select" id="contentReviewMode" aria-label="Content review depth">
+                  <option value="quick">Quick — representative review</option>
+                  <option value="thorough">Thorough — chunked full review</option>
+                </select>
+                <button class="button primary" type="button" id="contentReviewButton" disabled>Review content</button>
+              </div>
+              <div class="preview" id="contentReviewPreview">Analyze a document before reviewing its content.</div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h2 class="panel-title">Visual Layout Review</h2>
+              <span class="muted" id="layoutReviewState">No document selected</span>
+            </div>
+            <div class="panel-body">
+              <div class="notice">
+                Selected PDF pages are rendered in memory and sent to the configured AI provider. With Gemini this is external processing and may include signatures, stamps or other visual personal data. The result is advisory under general RK document rules; authenticity is not verified.
+              </div>
+              <div class="review-controls">
+                <button class="button primary" type="button" id="layoutReviewButton" disabled>Review layout visually</button>
+              </div>
+              <div class="preview" id="layoutReviewPreview">Select a PDF document to review its visual layout.</div>
             </div>
           </article>
         </section>
@@ -105,16 +142,16 @@
           <article class="panel">
             <div class="panel-head">
               <h2 class="panel-title">Upload</h2>
-              <span class="muted">PDF, TXT or DOCX</span>
+              <span class="muted">PDF only</span>
             </div>
             <div class="panel-body">
               <form id="uploadForm">
                 <div class="upload-zone" id="dropZone">
                   <div>
                     <p class="upload-title">Add a document</p>
-                    <p class="upload-copy">Drop a PDF, TXT or DOCX file here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
+                    <p class="upload-copy">Drop a PDF here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
                   </div>
-                  <input class="field" id="fileInput" type="file" accept=".pdf,.txt,.docx,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
+                  <input class="field" id="fileInput" type="file" accept=".pdf,application/pdf" required />
                   <button class="button primary" type="submit" id="uploadButton">Upload document</button>
                 </div>
               </form>

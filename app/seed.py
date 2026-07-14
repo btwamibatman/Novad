@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+import pymupdf
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,11 @@ from app.core.config import settings
 from app.core.database import create_session, init_db
 from app.models.document import Document
 from app.models.session import UserSession
-from app.services.text_analysis import analyze_text
+from app.services.text_analysis import (
+    ExtractedPage,
+    analyze_text,
+    assess_extraction_quality,
+)
 
 SAMPLE_TEXT = (
     "Document Processing API stores uploaded document metadata, extracts text, "
@@ -25,24 +30,36 @@ def seed_demo_document(db: Session) -> bool:
     upload_dir = Path(settings.storage_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    stored_filename = f"{uuid4()}.txt"
+    stored_filename = f"{uuid4()}.pdf"
     stored_file_path = upload_dir / stored_filename
-    stored_file_path.write_text(SAMPLE_TEXT, encoding="utf-8")
+    with pymupdf.open() as pdf:
+        page = pdf.new_page()
+        page.insert_textbox(
+            pymupdf.Rect(72, 72, page.rect.width - 72, page.rect.height - 72),
+            SAMPLE_TEXT,
+            fontsize=12,
+        )
+        pdf.save(stored_file_path)
 
     detected_language, word_count, char_count = analyze_text(SAMPLE_TEXT)
+    extraction_quality = assess_extraction_quality(
+        [ExtractedPage(1, SAMPLE_TEXT, "pypdf")]
+    )
     db_session = UserSession()
     db.add(db_session)
     db.flush()
     db.add(
         Document(
             session_id=db_session.id,
-            filename="sample-document.txt",
+            filename="sample-document.pdf",
             stored_filename=stored_filename,
             stored_path=stored_filename,
-            content_type="text/plain",
+            content_type="application/pdf",
             size_bytes=stored_file_path.stat().st_size,
             status="processed",
             extracted_text=SAMPLE_TEXT,
+            extraction_quality=extraction_quality.quality,
+            extraction_quality_meta=extraction_quality.meta,
             detected_language=detected_language,
             word_count=word_count,
             char_count=char_count,

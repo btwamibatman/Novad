@@ -19,6 +19,7 @@ class ChunkLike(Protocol):
     chunk_index: int
     page_number: int | None
     text: str
+    extraction_method: str
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class DocumentChunkAnalysis:
     page_number: int | None
     chunk_index: int
     text: str
+    extraction_method: str
     detected_language: str | None
     word_count: int
     char_count: int
@@ -75,6 +77,7 @@ def build_document_chunks(pages: Iterable[ExtractedPage]) -> list[DocumentChunkA
                     page_number=page.page_number,
                     chunk_index=chunk_index,
                     text=chunk_text,
+                    extraction_method=page.extraction_method,
                     detected_language=detected_language,
                     word_count=word_count,
                     char_count=char_count,
@@ -157,5 +160,9 @@ def format_chunks_for_context(chunks: Iterable[ChunkLike]) -> str:
     parts = []
     for chunk in chunks:
         page = f"page {chunk.page_number}" if chunk.page_number is not None else "document"
-        parts.append(f"[chunk {chunk.chunk_index}, {page}]\n{chunk.text.strip()}")
+        extraction_method = getattr(chunk, "extraction_method", "unknown")
+        parts.append(
+            f"[chunk {chunk.chunk_index}, {page}, extraction={extraction_method}]\n"
+            f"{chunk.text.strip()}"
+        )
     return "\n\n".join(parts)

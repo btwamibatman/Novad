@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title=settings.project_name,
     version="1.0.0",
-    description="Backend API for document uploading, metadata processing and text analysis.",
+    description="Backend API for PDF OCR, text analysis, AI content review and visual layout review.",
     lifespan=lifespan,
 )
 

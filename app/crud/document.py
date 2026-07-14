@@ -11,6 +11,7 @@ class DocumentChunkPayload:
     page_number: int | None
     chunk_index: int
     text: str
+    extraction_method: str
     detected_language: str | None
     word_count: int
     char_count: int
@@ -87,6 +88,8 @@ def update_document_analysis(
     *,
     status: str,
     extracted_text: str | None = None,
+    extraction_quality: str = "unknown",
+    extraction_quality_meta: dict | None = None,
     detected_language: str | None = None,
     language_distribution: dict[str, float] | None = None,
     word_count: int = 0,
@@ -96,6 +99,8 @@ def update_document_analysis(
 ) -> Document:
     if extracted_text is not None:
         db_document.extracted_text = extracted_text
+    db_document.extraction_quality = extraction_quality
+    db_document.extraction_quality_meta = extraction_quality_meta or {}
     db_document.status = status
     db_document.detected_language = detected_language
     if language_distribution is not None:
@@ -103,6 +108,14 @@ def update_document_analysis(
     db_document.word_count = word_count
     db_document.char_count = char_count
     db_document.error_message = error_message
+    db_document.ai_summary = ""
+    db_document.ai_model = None
+    db_document.ai_error = None
+    db_document.content_review = ""
+    db_document.content_review_model = None
+    db_document.content_review_error = None
+    db_document.content_review_mode = None
+    db_document.content_review_meta = {}
 
     if chunks is not None:
         db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == db_document.id))
@@ -112,6 +125,7 @@ def update_document_analysis(
                 page_number=chunk.page_number,
                 chunk_index=chunk.chunk_index,
                 text=chunk.text,
+                extraction_method=chunk.extraction_method,
                 detected_language=chunk.detected_language,
                 word_count=chunk.word_count,
                 char_count=chunk.char_count,
@@ -135,6 +149,46 @@ def update_document_summary(
     db_document.ai_summary = ai_summary
     db_document.ai_model = ai_model
     db_document.ai_error = ai_error
+    db.commit()
+    db.refresh(db_document)
+    return db_document
+
+
+def update_document_content_review(
+    db: Session,
+    db_document: Document,
+    *,
+    content_review: str,
+    content_review_model: str | None,
+    content_review_error: str | None,
+    content_review_mode: str | None,
+    content_review_meta: dict | None = None,
+) -> Document:
+    db_document.content_review = content_review
+    db_document.content_review_model = content_review_model
+    db_document.content_review_error = content_review_error
+    db_document.content_review_mode = content_review_mode
+    if content_review_meta is not None:
+        db_document.content_review_meta = content_review_meta
+    db.commit()
+    db.refresh(db_document)
+    return db_document
+
+
+def update_document_layout_review(
+    db: Session,
+    db_document: Document,
+    *,
+    layout_review: str,
+    layout_review_model: str | None,
+    layout_review_error: str | None,
+    layout_review_meta: dict | None = None,
+) -> Document:
+    db_document.layout_review = layout_review
+    db_document.layout_review_model = layout_review_model
+    db_document.layout_review_error = layout_review_error
+    if layout_review_meta is not None:
+        db_document.layout_review_meta = layout_review_meta
     db.commit()
     db.refresh(db_document)
     return db_document

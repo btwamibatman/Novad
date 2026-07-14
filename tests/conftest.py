@@ -11,6 +11,7 @@ from app import models  # noqa: F401
 from app.core.config import settings
 from app.core.database import Base, get_db
 from app.main import app
+from tests.pdf_helpers import make_pdf_with_text
 
 TEST_DATABASE_URL = "sqlite://"
 
@@ -62,14 +63,16 @@ def other_client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture()
-def txt_document_id(client: TestClient) -> int:
+def pdf_document_id(client: TestClient) -> int:
     response = client.post(
         "/api/documents/upload",
         files={
             "file": (
-                "sample.txt",
-                b"This document contains enough English text for language detection.",
-                "text/plain",
+                "sample.pdf",
+                make_pdf_with_text(
+                    "This document contains enough English text for language detection."
+                ),
+                "application/pdf",
             )
         },
     )

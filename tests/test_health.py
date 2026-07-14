@@ -15,4 +15,7 @@ def test_web_interface_returns_html(client):
     assert "text/html" in response.headers["content-type"]
     assert "Document Console" in response.text
     assert "aiChatToggle" in response.text
+    assert "contentReviewButton" in response.text
+    assert "layoutReviewButton" in response.text
+    assert "PDF only" in response.text
     assert "/web/app.js" in response.text

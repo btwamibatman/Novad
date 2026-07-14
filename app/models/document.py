@@ -21,6 +21,10 @@ class Document(Base):
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), index=True, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    extraction_quality: Mapped[str] = mapped_column(
+        String(20), default="unknown", nullable=False
+    )
+    extraction_quality_meta: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     detected_language: Mapped[str | None] = mapped_column(String(20), nullable=True)
     language_distribution: Mapped[dict[str, float]] = mapped_column(JSON, default=dict, nullable=False)
     word_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -29,6 +33,15 @@ class Document(Base):
     ai_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ai_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_review: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    content_review_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    content_review_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_review_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    content_review_meta: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    layout_review: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    layout_review_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    layout_review_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layout_review_meta: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

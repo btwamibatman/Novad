@@ -9,8 +9,6 @@ from app.core.config import settings
 
 CONTENT_TYPES_BY_EXTENSION = {
     ".pdf": "application/pdf",
-    ".txt": "text/plain",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 
@@ -29,7 +27,7 @@ def resolve_content_type(filename: str, content_type: str | None) -> str:
     if expected_type is None:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only PDF, TXT, and DOCX files are supported",
+            detail="Only PDF files are supported",
         )
     normalized_type = "" if content_type is None else content_type.split(";")[0].strip()
     if normalized_type in {"", "application/octet-stream", expected_type}:
@@ -49,6 +47,11 @@ async def save_upload(file: UploadFile) -> tuple[str, str, str, str, int]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
     if len(payload) > settings.max_upload_size_bytes:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File is too large")
+    if b"%PDF-" not in payload[:1024]:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Uploaded file content is not a PDF",
+        )
 
     upload_dir = Path(settings.storage_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)

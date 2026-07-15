@@ -3,39 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Document Console</title>
-    <link rel="stylesheet" href="/web/styles.css?v=20260715-markdown" />
+    <title data-i18n="page.title">Document Console</title>
+    <link rel="stylesheet" href="/web/styles.css?v=20260715-i18n" />
   </head>
   <body>
     <div class="shell">
       <header class="topbar">
         <div class="brand">
-          <h1 class="brand-title">Document Console</h1>
-          <p class="brand-subtitle">Backend system for document upload, metadata processing and text analysis</p>
+          <h1 class="brand-title" data-i18n="header.title">Document Console</h1>
+          <p class="brand-subtitle" data-i18n="header.subtitle">Backend system for document upload, metadata processing and text analysis</p>
         </div>
         <div class="actions">
-          <button class="button" type="button" id="refreshButton">Refresh</button>
-          <button class="button icon-btn" type="button" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">
+          <div class="language-switcher" role="group" aria-label="Interface language" data-i18n-aria-label="language.switcher_label">
+            <button class="language-button" type="button" data-language="en" aria-pressed="true">ENG</button>
+            <button class="language-button" type="button" data-language="ru" aria-pressed="false">RUS</button>
+          </div>
+          <button class="button" type="button" id="refreshButton" data-i18n="actions.refresh">Refresh</button>
+          <button class="button icon-btn" type="button" id="themeToggle" aria-label="Toggle theme" title="Toggle theme" data-i18n-aria-label="theme.toggle" data-i18n-title="theme.toggle">
             <span id="themeIcon">Sun</span>
           </button>
         </div>
       </header>
 
-      <section class="metrics" aria-label="Document metrics">
+      <section class="metrics" aria-label="Document metrics" data-i18n-aria-label="metrics.label">
         <article class="metric">
-          <p class="metric-label">Documents</p>
+          <p class="metric-label" data-i18n="metrics.documents">Documents</p>
           <p class="metric-value" id="totalDocuments">0</p>
         </article>
         <article class="metric">
-          <p class="metric-label">Processed</p>
+          <p class="metric-label" data-i18n="metrics.processed">Processed</p>
           <p class="metric-value" id="processedDocuments">0</p>
         </article>
         <article class="metric">
-          <p class="metric-label">Failed</p>
+          <p class="metric-label" data-i18n="metrics.failed">Failed</p>
           <p class="metric-value" id="failedDocuments">0</p>
         </article>
         <article class="metric">
-          <p class="metric-label">Storage</p>
+          <p class="metric-label" data-i18n="metrics.storage">Storage</p>
           <p class="metric-value" id="storageBytes">0 B</p>
         </article>
       </section>
@@ -44,31 +48,31 @@
         <section class="main-column">
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Documents</h2>
-              <span class="muted" id="tableState">Loading</span>
+              <h2 class="panel-title" data-i18n="documents.title">Documents</h2>
+              <span class="muted" id="tableState" data-i18n="common.loading">Loading</span>
             </div>
             <div class="panel-body">
               <div class="filters">
-                <input class="field" id="searchInput" placeholder="Search documents..." aria-label="Search documents" />
-                <select class="select" id="statusFilter" aria-label="Filter by status">
-                  <option value="all">All statuses</option>
-                  <option value="uploaded">Uploaded</option>
-                  <option value="processed">Processed</option>
-                  <option value="failed">Failed</option>
+                <input class="field" id="searchInput" placeholder="Search documents..." aria-label="Search documents" data-i18n-placeholder="documents.search_placeholder" data-i18n-aria-label="documents.search_label" />
+                <select class="select" id="statusFilter" aria-label="Filter by status" data-i18n-aria-label="documents.status_filter_label">
+                  <option value="all" data-i18n="status.all">All statuses</option>
+                  <option value="uploaded" data-i18n="status.uploaded">Uploaded</option>
+                  <option value="processed" data-i18n="status.processed">Processed</option>
+                  <option value="failed" data-i18n="status.failed">Failed</option>
                 </select>
               </div>
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>File</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>Size</th>
-                      <th>Language</th>
-                      <th>Words</th>
+                      <th data-i18n="documents.file">File</th>
+                      <th data-i18n="documents.type">Type</th>
+                      <th data-i18n="documents.status">Status</th>
+                      <th data-i18n="documents.size">Size</th>
+                      <th data-i18n="documents.language">Language</th>
+                      <th data-i18n="documents.words">Words</th>
                       <th>AI</th>
-                      <th>Actions</th>
+                      <th data-i18n="documents.actions">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="documentsBody"></tbody>
@@ -79,61 +83,61 @@
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Analysis Preview</h2>
-              <span class="muted" id="previewState">No document selected</span>
+              <h2 class="panel-title" data-i18n="analysis.title">Analysis Preview</h2>
+              <span class="muted" id="previewState" data-i18n="common.no_document_selected">No document selected</span>
             </div>
             <div class="panel-body">
               <div class="notice" id="analysisQualityNotice" hidden></div>
-              <div class="preview" id="analysisPreview">Select a processed document to inspect extracted text.</div>
+              <div class="preview" id="analysisPreview" data-i18n="analysis.select_processed">Select a processed document to inspect extracted text.</div>
             </div>
           </article>
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">AI Summary</h2>
-              <span class="muted" id="summaryState">No document selected</span>
+              <h2 class="panel-title" data-i18n="summary.title">AI Summary</h2>
+              <span class="muted" id="summaryState" data-i18n="common.no_document_selected">No document selected</span>
             </div>
             <div class="panel-body">
-              <div class="notice">
+              <div class="notice" data-i18n="summary.notice">
                 The summary uses extracted text only. Content quality and visual layout are reviewed separately below.
               </div>
-              <div class="preview" id="summaryPreview">Analyze a document before generating an AI summary.</div>
+              <div class="preview" id="summaryPreview" data-i18n="summary.analyze_first_help">Analyze a document before generating an AI summary.</div>
             </div>
           </article>
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Content Quality Review</h2>
-              <span class="muted" id="contentReviewState">No document selected</span>
+              <h2 class="panel-title" data-i18n="content_review.title">Content Quality Review</h2>
+              <span class="muted" id="contentReviewState" data-i18n="common.no_document_selected">No document selected</span>
             </div>
             <div class="panel-body">
-              <div class="notice">
+              <div class="notice" data-i18n="content_review.notice">
                 Uses extracted text to check spelling, punctuation, grammar, official style, logic and internal factual consistency. Possible OCR artifacts are reported separately; external facts and plagiarism are not checked.
               </div>
               <div class="review-controls">
-                <select class="select" id="contentReviewMode" aria-label="Content review depth">
-                  <option value="quick">Quick — representative review</option>
-                  <option value="thorough">Thorough — chunked full review</option>
+                <select class="select" id="contentReviewMode" aria-label="Content review depth" data-i18n-aria-label="content_review.depth_label">
+                  <option value="quick" data-i18n="content_review.quick">Quick — representative review</option>
+                  <option value="thorough" data-i18n="content_review.thorough">Thorough — chunked full review</option>
                 </select>
-                <button class="button primary" type="button" id="contentReviewButton" disabled>Review content</button>
+                <button class="button primary" type="button" id="contentReviewButton" disabled data-i18n="content_review.action">Review content</button>
               </div>
-              <div class="preview" id="contentReviewPreview">Analyze a document before reviewing its content.</div>
+              <div class="preview" id="contentReviewPreview" data-i18n="content_review.analyze_first_help">Analyze a document before reviewing its content.</div>
             </div>
           </article>
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Visual Layout Review</h2>
-              <span class="muted" id="layoutReviewState">No document selected</span>
+              <h2 class="panel-title" data-i18n="layout_review.title">Visual Layout Review</h2>
+              <span class="muted" id="layoutReviewState" data-i18n="common.no_document_selected">No document selected</span>
             </div>
             <div class="panel-body">
-              <div class="notice">
+              <div class="notice" data-i18n="layout_review.notice">
                 Selected PDF pages are rendered in memory and sent to the configured AI provider. With Gemini this is external processing and may include signatures, stamps or other visual personal data. The result is advisory under general RK document rules; authenticity is not verified.
               </div>
               <div class="review-controls">
-                <button class="button primary" type="button" id="layoutReviewButton" disabled>Review layout visually</button>
+                <button class="button primary" type="button" id="layoutReviewButton" disabled data-i18n="layout_review.action">Review layout visually</button>
               </div>
-              <div class="preview" id="layoutReviewPreview">Select a PDF document to review its visual layout.</div>
+              <div class="preview" id="layoutReviewPreview" data-i18n="layout_review.select_pdf">Select a PDF document to review its visual layout.</div>
             </div>
           </article>
         </section>
@@ -141,18 +145,18 @@
         <aside class="side-column">
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Upload</h2>
-              <span class="muted">PDF only</span>
+              <h2 class="panel-title" data-i18n="upload.title">Upload</h2>
+              <span class="muted" data-i18n="common.pdf_only">PDF only</span>
             </div>
             <div class="panel-body">
               <form id="uploadForm">
                 <div class="upload-zone" id="dropZone">
                   <div>
-                    <p class="upload-title">Add a document</p>
-                    <p class="upload-copy">Drop a PDF here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
+                    <p class="upload-title" data-i18n="upload.add_document">Add a document</p>
+                    <p class="upload-copy" data-i18n="upload.help">Drop a PDF here or choose one from disk. The file is stored locally and metadata is saved in PostgreSQL.</p>
                   </div>
                   <input class="field" id="fileInput" type="file" accept=".pdf,application/pdf" required />
-                  <button class="button primary" type="submit" id="uploadButton">Upload document</button>
+                  <button class="button primary" type="submit" id="uploadButton" data-i18n="upload.action">Upload document</button>
                 </div>
               </form>
             </div>
@@ -160,17 +164,17 @@
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Selected Document</h2>
-              <span class="muted" id="selectedState">None</span>
+              <h2 class="panel-title" data-i18n="details.title">Selected Document</h2>
+              <span class="muted" id="selectedState" data-i18n="common.none">None</span>
             </div>
             <div class="panel-body" id="detailsPanel">
-              <div class="empty">Select a document from the table.</div>
+              <div class="empty" data-i18n="details.select_document">Select a document from the table.</div>
             </div>
           </article>
 
           <article class="panel">
             <div class="panel-head">
-              <h2 class="panel-title">Languages</h2>
+              <h2 class="panel-title" data-i18n="languages.title">Languages</h2>
             </div>
             <div class="panel-body">
               <div class="language-list" id="languageList"></div>
@@ -180,27 +184,27 @@
       </main>
     </div>
 
-    <section class="ai-chat-popup" id="aiChatPopup" aria-label="AI document chat" hidden>
+    <section class="ai-chat-popup" id="aiChatPopup" aria-label="AI document chat" data-i18n-aria-label="chat.label" hidden>
       <div class="ai-chat-head">
         <div>
-          <h2 class="panel-title">AI Document Chat</h2>
-          <p class="ai-chat-subtitle" id="aiChatState">Choose a processed document.</p>
+          <h2 class="panel-title" data-i18n="chat.title">AI Document Chat</h2>
+          <p class="ai-chat-subtitle" id="aiChatState" data-i18n="chat.choose_processed">Choose a processed document.</p>
         </div>
-        <button class="button small icon-btn" type="button" id="aiChatClose" aria-label="Close AI chat">×</button>
+        <button class="button small icon-btn" type="button" id="aiChatClose" aria-label="Close AI chat" data-i18n-aria-label="chat.close">×</button>
       </div>
       <div class="ai-chat-body">
-        <select class="select" id="aiChatDocumentSelect" aria-label="Choose document for AI chat"></select>
+        <select class="select" id="aiChatDocumentSelect" aria-label="Choose document for AI chat" data-i18n-aria-label="chat.document_select"></select>
         <div class="ai-chat-messages" id="aiChatMessages"></div>
         <form class="ai-chat-form" id="aiChatForm">
-          <textarea class="field ai-chat-input" id="aiChatInput" rows="3" maxlength="1000" placeholder="Ask about the selected document..."></textarea>
-          <button class="button primary" type="submit" id="aiChatSend">Send</button>
+          <textarea class="field ai-chat-input" id="aiChatInput" rows="3" maxlength="1000" placeholder="Ask about the selected document..." data-i18n-placeholder="chat.placeholder"></textarea>
+          <button class="button primary" type="submit" id="aiChatSend" data-i18n="chat.send">Send</button>
         </form>
       </div>
     </section>
-    <button class="ai-chat-toggle" type="button" id="aiChatToggle" aria-label="Open AI chat">AI</button>
+    <button class="ai-chat-toggle" type="button" id="aiChatToggle" aria-label="Open AI chat" data-i18n-aria-label="chat.open">AI</button>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <script src="/web/app.js?v=20260715-markdown"></script>
+    <script src="/web/app.js?v=20260715-i18n"></script>
   </body>
 </html>

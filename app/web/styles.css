@@ -404,6 +404,38 @@ tr[data-selected="true"] {
   color: var(--text);
 }
 
+#contentReviewPreview {
+  white-space: normal;
+}
+
+.preview p {
+  margin: 0 0 12px;
+}
+
+.preview p:last-child {
+  margin-bottom: 0;
+}
+
+.preview ul,
+.preview ol {
+  margin: 8px 0 12px;
+  padding-left: 24px;
+}
+
+.preview li {
+  margin-bottom: 6px;
+}
+
+.preview strong {
+  font-weight: 700;
+}
+
+.preview h1,
+.preview h2,
+.preview h3 {
+  margin: 16px 0 8px;
+}
+
 .notice {
   margin-bottom: 12px;
   border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border));

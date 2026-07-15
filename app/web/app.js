@@ -62,6 +62,11 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function renderMarkdown(element, markdown) {
+  const unsafeHtml = marked.parse(markdown || "");
+  element.innerHTML = DOMPurify.sanitize(unsafeHtml);
+}
+
 function formatBytes(bytes) {
   if (!bytes) {
     return "0 B";
@@ -456,9 +461,10 @@ function renderDetails() {
     (documentItem.status === "processed"
       ? "Choose a review depth and start the content quality review."
       : "Document must be analyzed first.");
-  elements.contentReviewPreview.textContent = qualityWarning
+  const contentReviewMarkdown = qualityWarning
     ? `${qualityWarning}\n\n${contentReviewText}`
     : contentReviewText;
+  renderMarkdown(elements.contentReviewPreview, contentReviewMarkdown);
 
   const isPdf = documentItem.content_type === "application/pdf";
   const layoutMeta = documentItem.layout_review_meta || {};

@@ -198,3 +198,5 @@ The visual result is advisory. It uses the general document rules established by
 - AI calls are synchronous in this phase. Background jobs are deferred to the local-AI phase.
 - OCR quality depends on scan quality and installed `rus+kaz+eng` Tesseract language data. The quality gate is heuristic: every OCR page remains advisory and requires manual verification of names, dates and identifiers.
 - Visual review checks selected pages by default, so it cannot prove that an element is absent from unreviewed pages.
+
+..

@@ -102,7 +102,7 @@ def test_list_and_get_document(client, pdf_document_id):
     assert response.json()["id"] == pdf_document_id
 
 
-def test_documents_are_scoped_to_session(client, other_client, pdf_document_id):
+def test_documents_are_scoped_to_user(client, other_client, pdf_document_id):
     response = other_client.get("/api/documents")
     assert response.status_code == 200
     assert response.json() == []
@@ -111,11 +111,12 @@ def test_documents_are_scoped_to_session(client, other_client, pdf_document_id):
     assert response.status_code == 404
 
 
-def test_session_endpoint_creates_cookie(client):
+def test_session_endpoint_returns_authenticated_session(client):
     response = client.get("/api/session")
 
     assert response.status_code == 200
     assert response.json()["session_id"]
+    assert response.json()["user_id"]
     assert response.json()["expires_at"]
     assert "document_session" in response.cookies
 

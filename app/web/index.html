@@ -4,10 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-i18n="page.title">Document Console</title>
-    <link rel="stylesheet" href="/web/styles.css?v=20260715-i18n" />
+    <link rel="stylesheet" href="/web/styles.css?v=20260718-auth-b" />
   </head>
   <body>
-    <div class="shell">
+    <section class="auth-view" id="authView">
+      <article class="auth-card">
+        <div class="auth-brand">
+          <p class="auth-eyebrow">Document Console</p>
+          <h1 class="auth-title" data-i18n="auth.title">Sign in</h1>
+          <p class="auth-copy" data-i18n="auth.subtitle">Use the account created by the server administrator.</p>
+        </div>
+        <form class="auth-form" id="loginForm">
+          <label class="auth-field">
+            <span data-i18n="auth.username">Username</span>
+            <input class="field" id="loginUsername" name="username" autocomplete="username" maxlength="100" required />
+          </label>
+          <label class="auth-field">
+            <span data-i18n="auth.password">Password</span>
+            <input class="field" id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="1024" required />
+          </label>
+          <p class="auth-error" id="loginError" role="alert" hidden></p>
+          <button class="button primary auth-submit" type="submit" id="loginButton" data-i18n="auth.sign_in">Sign in</button>
+        </form>
+        <div class="language-switcher auth-languages" role="group" aria-label="Interface language" data-i18n-aria-label="language.switcher_label">
+          <button class="language-button" type="button" data-language="en" aria-pressed="true">ENG</button>
+          <button class="language-button" type="button" data-language="ru" aria-pressed="false">RUS</button>
+        </div>
+      </article>
+    </section>
+
+    <div class="shell" id="appShell" hidden>
       <header class="topbar">
         <div class="brand">
           <h1 class="brand-title" data-i18n="header.title">Document Console</h1>
@@ -18,7 +44,9 @@
             <button class="language-button" type="button" data-language="en" aria-pressed="true">ENG</button>
             <button class="language-button" type="button" data-language="ru" aria-pressed="false">RUS</button>
           </div>
+          <span class="current-user" id="currentUsername"></span>
           <button class="button" type="button" id="refreshButton" data-i18n="actions.refresh">Refresh</button>
+          <button class="button" type="button" id="logoutButton" data-i18n="auth.sign_out">Sign out</button>
           <button class="button icon-btn" type="button" id="themeToggle" aria-label="Toggle theme" title="Toggle theme" data-i18n-aria-label="theme.toggle" data-i18n-title="theme.toggle">
             <span id="themeIcon">Sun</span>
           </button>
@@ -201,10 +229,10 @@
         </form>
       </div>
     </section>
-    <button class="ai-chat-toggle" type="button" id="aiChatToggle" aria-label="Open AI chat" data-i18n-aria-label="chat.open">AI</button>
+    <button class="ai-chat-toggle" type="button" id="aiChatToggle" aria-label="Open AI chat" data-i18n-aria-label="chat.open" hidden>AI</button>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <script src="/web/app.js?v=20260715-i18n"></script>
+    <script src="/web/app.js?v=20260718-auth-b"></script>
   </body>
 </html>

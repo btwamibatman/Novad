@@ -13,6 +13,15 @@ const state = {
 };
 
 const elements = {
+  authView: document.querySelector("#authView"),
+  appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginButton: document.querySelector("#loginButton"),
+  loginError: document.querySelector("#loginError"),
+  logoutButton: document.querySelector("#logoutButton"),
+  currentUsername: document.querySelector("#currentUsername"),
   totalDocuments: document.querySelector("#totalDocuments"),
   processedDocuments: document.querySelector("#processedDocuments"),
   failedDocuments: document.querySelector("#failedDocuments"),
@@ -260,7 +269,7 @@ function sessionExpired() {
 }
 
 async function loadSession() {
-  state.session = await fetchJson("/api/session");
+  state.session = await fetchJson("/api/auth/me");
   return state.session;
 }
 
@@ -296,7 +305,27 @@ function writeChatMessages(documentId, messages) {
   );
 }
 
-function clearSessionState(message = t("session.expired")) {
+function showLoginView(message = "") {
+  elements.authView.hidden = false;
+  elements.appShell.hidden = true;
+  elements.aiChatToggle.hidden = true;
+  elements.aiChatPopup.hidden = true;
+  elements.currentUsername.textContent = "";
+  elements.loginError.textContent = message;
+  elements.loginError.hidden = !message;
+  elements.loginPassword.value = "";
+  requestAnimationFrame(() => elements.loginUsername.focus());
+}
+
+function showAppView() {
+  elements.authView.hidden = true;
+  elements.appShell.hidden = false;
+  elements.aiChatToggle.hidden = false;
+  elements.currentUsername.textContent = state.session?.user?.username || "";
+  elements.loginError.hidden = true;
+}
+
+function clearSessionState(message = t("auth.session_expired")) {
   if (state.chatAbortController) {
     state.chatAbortController.abort();
     state.chatAbortController = null;
@@ -312,12 +341,13 @@ function clearSessionState(message = t("session.expired")) {
   state.session = null;
   state.selectedId = null;
   state.chatDocumentId = null;
+  state.chatOpen = false;
   render();
-  showToast(message, "error");
+  showLoginView(message);
 }
 
 function handleApiError(error) {
-  if (error.status === 401 || error.status === 419) {
+  if (error.status === 401) {
     clearSessionState();
     return true;
   }
@@ -653,11 +683,14 @@ function renderSkeleton() {
   ).join("");
 }
 
-async function loadData() {
+async function loadData(refreshSession = true) {
   setLoading(true);
   renderSkeleton();
   try {
-    await loadSession();
+    if (refreshSession) {
+      await loadSession();
+    }
+    showAppView();
     const [summary, documents] = await Promise.all([
       fetchJson("/api/dashboard/summary"),
       fetchJson("/api/documents"),
@@ -867,6 +900,57 @@ async function deleteDocument(documentId) {
   }
 }
 
+async function login(event) {
+  event.preventDefault();
+  elements.loginButton.disabled = true;
+  elements.loginButton.classList.add("loading");
+  elements.loginError.hidden = true;
+  try {
+    state.session = await fetchJson("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: elements.loginUsername.value,
+        password: elements.loginPassword.value,
+      }),
+    });
+    elements.loginPassword.value = "";
+    showAppView();
+    await loadData(false);
+  } catch (error) {
+    if (error.status === 401) {
+      elements.loginError.textContent = t("auth.invalid_credentials");
+    } else if (error.status === 429) {
+      elements.loginError.textContent = t("errors.rate_limit", {
+        seconds: error.retryAfter || t("errors.a_few"),
+      });
+    } else {
+      elements.loginError.textContent = error.message || t("errors.request_failed");
+    }
+    elements.loginError.hidden = false;
+  } finally {
+    elements.loginButton.disabled = false;
+    elements.loginButton.classList.remove("loading");
+  }
+}
+
+async function logout() {
+  elements.logoutButton.disabled = true;
+  try {
+    await fetchJson("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    if (error.status !== 401) {
+      showToast(error.message, "error");
+    }
+  } finally {
+    elements.logoutButton.disabled = false;
+    clearSessionState("");
+  }
+}
+
+elements.loginForm.addEventListener("submit", login);
+elements.logoutButton.addEventListener("click", logout);
+
 elements.themeToggle.addEventListener("click", () => {
   const current = document.documentElement.getAttribute("data-theme") || "dark";
   setTheme(current === "dark" ? "light" : "dark");
@@ -1001,7 +1085,17 @@ async function initialize() {
     }
     setTheme(localStorage.getItem("document-console-theme") || "dark");
   }
-  await loadData();
+  try {
+    await loadSession();
+    showAppView();
+    await loadData(false);
+  } catch (error) {
+    if (error.status === 401) {
+      showLoginView();
+      return;
+    }
+    showLoginView(error.message || t("errors.request_failed"));
+  }
 }
 
 initialize();

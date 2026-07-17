@@ -30,6 +30,7 @@ The project is designed for industrial practice reporting and uses only demo/loc
 - Quick representative or thorough chunked content-quality review
 - Ephemeral visual review of selected PDF pages under general RK document rules
 - Dashboard summary endpoint
+- Username/password authentication with server-side sessions
 - Static Document Console at `/`
 - Swagger UI at `/docs`
 - Basic pytest coverage
@@ -84,6 +85,19 @@ For an existing database, apply the Alembic migration after rebuilding:
 docker compose exec api alembic upgrade head
 ```
 
+Create the first user. The password is requested twice without being displayed:
+
+```bash
+docker compose exec api python -m app.create_user admin
+```
+
+If the database contains documents created before authentication was enabled, assign
+them explicitly to that user:
+
+```bash
+docker compose exec api python -m app.claim_legacy_documents admin
+```
+
 Open:
 
 - Document Console: `http://localhost:8000`
@@ -107,6 +121,11 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
+
+For local development, create a user with `python -m app.create_user admin` and sign
+in through the same page. Development cookies work over `http://localhost`; production
+cookies require HTTPS. Authentication is not bypassed in development. If convenient,
+set a longer local-only `SESSION_TTL_MINUTES` in `.env` instead of disabling auth.
 
 ## Seed Data
 

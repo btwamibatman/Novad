@@ -17,20 +17,20 @@ class DocumentChunkPayload:
     char_count: int
 
 
-def get_document(db: Session, document_id: int, session_id: str) -> Document | None:
+def get_document(db: Session, document_id: int, user_id: int) -> Document | None:
     return db.scalar(
         select(Document).where(
             Document.id == document_id,
-            Document.session_id == session_id,
+            Document.user_id == user_id,
         )
     )
 
 
-def get_documents(db: Session, session_id: str) -> list[Document]:
+def get_documents(db: Session, user_id: int) -> list[Document]:
     return list(
         db.scalars(
             select(Document)
-            .where(Document.session_id == session_id)
+            .where(Document.user_id == user_id)
             .order_by(Document.created_at.desc())
         ).all()
     )
@@ -46,11 +46,11 @@ def get_document_chunks(db: Session, document_id: int) -> list[DocumentChunk]:
     )
 
 
-def get_session_storage_bytes(db: Session, session_id: str) -> int:
+def get_user_storage_bytes(db: Session, user_id: int) -> int:
     return int(
         db.scalar(
             select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
-                Document.session_id == session_id
+                Document.user_id == user_id
             )
         )
         or 0
@@ -60,6 +60,7 @@ def get_session_storage_bytes(db: Session, session_id: str) -> int:
 def create_document(
     db: Session,
     *,
+    user_id: int,
     session_id: str,
     filename: str,
     stored_filename: str,
@@ -73,6 +74,7 @@ def create_document(
         stored_path=stored_path,
         content_type=content_type,
         size_bytes=size_bytes,
+        user_id=user_id,
         session_id=session_id,
         status="uploaded",
     )

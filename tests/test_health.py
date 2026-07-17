@@ -14,6 +14,8 @@ def test_web_interface_returns_html(client):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Document Console" in response.text
+    assert "loginForm" in response.text
+    assert "logoutButton" in response.text
     assert "aiChatToggle" in response.text
     assert "contentReviewButton" in response.text
     assert "layoutReviewButton" in response.text

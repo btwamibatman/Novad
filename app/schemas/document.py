@@ -14,7 +14,7 @@ class DocumentReviewRequest(BaseModel):
 
 class DocumentRead(BaseModel):
     id: int
-    session_id: str
+    user_id: int
     filename: str
     content_type: str
     size_bytes: int

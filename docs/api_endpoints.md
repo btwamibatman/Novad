@@ -4,6 +4,9 @@ This document lists the available REST endpoints for Document Processing API.
 
 The API stores uploaded PDF files on disk and stores metadata, extracted text, text metrics, AI summaries and review results in the database.
 
+Dashboard and document endpoints require an authenticated server-side session. The
+browser receives the opaque session token in an HttpOnly cookie after login.
+
 ## Public Pages
 
 | Method | Path | Description |
@@ -11,6 +14,24 @@ The API stores uploaded PDF files on disk and stores metadata, extracted text, t
 | GET | `/` | Open the static Document Console |
 | GET | `/docs` | Open Swagger UI |
 | GET | `/health` | Check API status |
+
+## Authentication
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/auth/login` | Sign in with username and password |
+| GET | `/api/auth/me` | Read the current authenticated session and user |
+| POST | `/api/auth/logout` | Revoke the current server session |
+| GET | `/api/session` | Read the current internal session id and expiry |
+
+Command-line example using a cookie jar:
+
+```bash
+curl -c cookies.txt -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"your-password"}'
+curl -b cookies.txt http://localhost:8000/api/documents
+```
 
 ## Dashboard
 

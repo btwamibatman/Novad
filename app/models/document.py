@@ -18,7 +18,16 @@ class Document(Base):
     stored_path: Mapped[str] = mapped_column(String(500), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), index=True, nullable=False)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     extraction_quality: Mapped[str] = mapped_column(

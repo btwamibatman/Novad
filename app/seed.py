@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import create_session, init_db
 from app.models.document import Document
-from app.models.session import UserSession
+from app.models.user import User
 from app.services.text_analysis import (
     ExtractedPage,
     analyze_text,
@@ -25,6 +25,11 @@ def seed_demo_document(db: Session) -> bool:
     existing_documents = db.scalar(select(func.count(Document.id)))
     if existing_documents:
         print("Seed skipped: documents already exist.")
+        return False
+
+    db_user = db.scalar(select(User).where(User.is_active.is_(True)).order_by(User.id))
+    if db_user is None:
+        print("Seed skipped: create an active user first with python -m app.create_user.")
         return False
 
     upload_dir = Path(settings.storage_dir)
@@ -45,12 +50,10 @@ def seed_demo_document(db: Session) -> bool:
     extraction_quality = assess_extraction_quality(
         [ExtractedPage(1, SAMPLE_TEXT, "pypdf")]
     )
-    db_session = UserSession()
-    db.add(db_session)
-    db.flush()
     db.add(
         Document(
-            session_id=db_session.id,
+            user_id=db_user.id,
+            session_id=None,
             filename="sample-document.pdf",
             stored_filename=stored_filename,
             stored_path=stored_filename,

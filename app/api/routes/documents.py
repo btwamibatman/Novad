@@ -38,9 +38,9 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    await enforce_rate_limit(current_session.id, "upload", limit=10)
+    await enforce_rate_limit(f"user:{current_session.user_id}", "upload", limit=10)
     filename, stored_filename, stored_path, content_type, size_bytes = await save_upload(file)
-    used_bytes = document_crud.get_session_storage_bytes(db, current_session.id)
+    used_bytes = document_crud.get_user_storage_bytes(db, current_session.user_id)
     if used_bytes + size_bytes > settings.session_storage_quota_bytes:
         remove_stored_file(stored_path)
         raise HTTPException(
@@ -55,6 +55,7 @@ async def upload_document(
     try:
         return document_crud.create_document(
             db,
+            user_id=current_session.user_id,
             session_id=current_session.id,
             filename=filename,
             stored_filename=stored_filename,
@@ -72,7 +73,7 @@ def read_documents(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> list[Document]:
-    return document_crud.get_documents(db, current_session.id)
+    return document_crud.get_documents(db, current_session.user_id)
 
 
 @router.get("/{document_id}", response_model=DocumentRead)
@@ -81,7 +82,7 @@ def read_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    return get_document_or_404(db, document_id, current_session.id)
+    return get_document_or_404(db, document_id, current_session.user_id)
 
 
 @router.post("/{document_id}/analyze", response_model=DocumentRead)
@@ -90,7 +91,7 @@ def analyze_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     try:
         extracted_pages = extract_text_pages(db_document)
         extracted_text = join_page_text(extracted_pages).strip()
@@ -134,8 +135,8 @@ async def summarize_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    await enforce_rate_limit(current_session.id, "summarize", limit=5)
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    await enforce_rate_limit(f"user:{current_session.user_id}", "summarize", limit=5)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     if db_document.status != "processed" or not db_document.extracted_text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -205,11 +206,11 @@ async def review_document_content(
 ) -> Document:
     rate_limit = 5 if payload.mode == "quick" else 1
     await enforce_rate_limit(
-        current_session.id,
+        f"user:{current_session.user_id}",
         f"content-review-{payload.mode}",
         limit=rate_limit,
     )
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     if db_document.status != "processed" or not db_document.extracted_text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -288,8 +289,8 @@ async def review_document_layout(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    await enforce_rate_limit(current_session.id, "layout-review", limit=5)
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    await enforce_rate_limit(f"user:{current_session.user_id}", "layout-review", limit=5)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     if db_document.content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -387,8 +388,8 @@ async def ask_document_question(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> AIChatResponse:
-    await enforce_rate_limit(current_session.id, "ask", limit=10)
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    await enforce_rate_limit(f"user:{current_session.user_id}", "ask", limit=10)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     if db_document.status != "processed" or not db_document.extracted_text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -436,7 +437,7 @@ def download_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> FileResponse:
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     return FileResponse(
         resolve_stored_path(db_document.stored_path),
         media_type=db_document.content_type,
@@ -450,7 +451,7 @@ def delete_document(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> None:
-    db_document = get_document_or_404(db, document_id, current_session.id)
+    db_document = get_document_or_404(db, document_id, current_session.user_id)
     stored_path = db_document.stored_path
     document_crud.delete_document(db, db_document)
     remove_stored_file(stored_path)

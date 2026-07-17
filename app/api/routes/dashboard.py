@@ -19,19 +19,19 @@ def read_dashboard_summary(
     row = db.execute(
         select(
             select(func.count(Document.id))
-            .where(Document.session_id == current_session.id)
+            .where(Document.user_id == current_session.user_id)
             .scalar_subquery()
             .label("total_documents"),
             select(func.count(Document.id))
-            .where(Document.session_id == current_session.id, Document.status == "processed")
+            .where(Document.user_id == current_session.user_id, Document.status == "processed")
             .scalar_subquery()
             .label("processed_documents"),
             select(func.count(Document.id))
-            .where(Document.session_id == current_session.id, Document.status == "failed")
+            .where(Document.user_id == current_session.user_id, Document.status == "failed")
             .scalar_subquery()
             .label("failed_documents"),
             select(func.coalesce(func.sum(Document.size_bytes), 0))
-            .where(Document.session_id == current_session.id)
+            .where(Document.user_id == current_session.user_id)
             .scalar_subquery()
             .label("storage_bytes"),
         )
@@ -40,7 +40,7 @@ def read_dashboard_summary(
     language_distributions = db.scalars(
         select(Document.language_distribution)
         .where(
-            Document.session_id == current_session.id,
+            Document.user_id == current_session.user_id,
             Document.status == "processed",
         )
     ).all()

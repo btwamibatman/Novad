@@ -7,9 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     project_name: str = "Document Processing API"
     environment: Literal["development", "production"] = "development"
+    allowed_hosts: str = "localhost,127.0.0.1,testserver"
     database_url: str = "sqlite:///./documents.db"
     storage_dir: str = "storage/uploads"
     max_upload_size_bytes: int = 10 * 1024 * 1024
+    max_request_size_bytes: int = 11 * 1024 * 1024
     session_cookie_name: str = "document_session"
     session_ttl_minutes: int = 120
     session_cleanup_interval_seconds: int = 900
@@ -36,7 +38,23 @@ class Settings(BaseSettings):
     ocr_min_text_signal_chars: int = 30
 
     @model_validator(mode="after")
-    def use_host_only_cookie_name_in_production(self) -> "Settings":
+    def validate_security_settings(self) -> "Settings":
+        if not self.allowed_host_list:
+            raise ValueError("ALLOWED_HOSTS must contain at least one host")
+        if any("://" in host or "/" in host for host in self.allowed_host_list):
+            raise ValueError("ALLOWED_HOSTS entries must be hostnames without scheme or path")
+        if self.is_production and (
+            "*" in self.allowed_host_list
+            or set(self.allowed_host_list) <= {"localhost", "127.0.0.1", "testserver"}
+        ):
+            raise ValueError("Production requires an explicit public ALLOWED_HOSTS value")
+        if self.max_upload_size_bytes <= 0:
+            raise ValueError("MAX_UPLOAD_SIZE_BYTES must be greater than zero")
+        if self.max_request_size_bytes <= self.max_upload_size_bytes:
+            raise ValueError(
+                "MAX_REQUEST_SIZE_BYTES must be greater than MAX_UPLOAD_SIZE_BYTES "
+                "to allow multipart overhead"
+            )
         if self.is_production and not self.session_cookie_name.startswith("__Host-"):
             self.session_cookie_name = f"__Host-{self.session_cookie_name}"
         return self
@@ -44,6 +62,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def allowed_host_list(self) -> list[str]:
+        return [host.strip().lower() for host in self.allowed_hosts.split(",") if host.strip()]
 
     model_config = SettingsConfigDict(
         env_file=".env",

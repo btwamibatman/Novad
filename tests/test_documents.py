@@ -64,6 +64,26 @@ def test_reject_pdf_extension_with_non_pdf_content(client):
 
     assert response.status_code == 415
     assert response.json()["detail"] == "Uploaded file content is not a PDF"
+    assert list(Path(settings.storage_dir).iterdir()) == []
+
+
+def test_reject_oversized_pdf_without_leaving_partial_file(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_upload_size_bytes", 8)
+
+    response = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "large.pdf",
+                b"%PDF-1.7\nextra bytes",
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "File is too large"
+    assert list(Path(settings.storage_dir).iterdir()) == []
 
 
 def test_upload_pdf_with_charset_content_type(client):

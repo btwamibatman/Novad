@@ -7,11 +7,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware import Middleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import create_session, init_db
 from app.crud.session import cleanup_expired_sessions
+from app.middleware.request_size import RequestSizeLimitMiddleware
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -46,6 +49,17 @@ app = FastAPI(
     version="1.0.0",
     description="Backend API for PDF OCR, text analysis, AI content review and visual layout review.",
     lifespan=lifespan,
+    middleware=[
+        Middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=settings.allowed_host_list,
+            www_redirect=False,
+        ),
+        Middleware(
+            RequestSizeLimitMiddleware,
+            max_bytes=settings.max_request_size_bytes,
+        ),
+    ],
 )
 
 app.include_router(api_router)

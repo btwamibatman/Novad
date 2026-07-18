@@ -134,6 +134,14 @@ and `Path=/`. Unsupported environment names fail configuration validation. Do no
 enable production mode over local HTTP because browsers will not return a `Secure`
 cookie over an unencrypted connection.
 
+Requests are accepted only for hosts listed in `ALLOWED_HOSTS`. The development
+default is `localhost,127.0.0.1,testserver`; production requires an explicit public
+domain or IP and rejects the unrestricted `*` value. `MAX_REQUEST_SIZE_BYTES` limits
+the complete HTTP request body to 11 MiB, including multipart framing, while
+`MAX_UPLOAD_SIZE_BYTES` keeps the PDF itself limited to 10 MiB. Oversized requests
+return HTTP 413 and partial upload files are removed. When Nginx is added, configure
+its request-body limit to match this application boundary.
+
 ## Seed Data
 
 Create one processed sample PDF document:

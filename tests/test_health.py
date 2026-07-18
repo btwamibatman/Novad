@@ -8,6 +8,16 @@ def test_health_returns_ok(client):
     }
 
 
+def test_untrusted_host_is_rejected(anonymous_client):
+    response = anonymous_client.get(
+        "/health",
+        headers={"Host": "attacker.example"},
+    )
+
+    assert response.status_code == 400
+    assert response.text == "Invalid host header"
+
+
 def test_web_interface_returns_html(client):
     response = client.get("/")
 

@@ -10,6 +10,7 @@ from app.core.config import settings
 CONTENT_TYPES_BY_EXTENSION = {
     ".pdf": "application/pdf",
 }
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def clean_filename(filename: str | None) -> str:
@@ -41,26 +42,42 @@ def resolve_content_type(filename: str, content_type: str | None) -> str:
 async def save_upload(file: UploadFile) -> tuple[str, str, str, str, int]:
     filename = clean_filename(file.filename)
     content_type = resolve_content_type(filename, file.content_type)
-    payload = await file.read()
-
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
-    if len(payload) > settings.max_upload_size_bytes:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File is too large")
-    if b"%PDF-" not in payload[:1024]:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Uploaded file content is not a PDF",
-        )
 
     upload_dir = Path(settings.storage_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     stored_filename = f"{uuid4()}{Path(filename).suffix.lower()}"
     stored_file_path = upload_dir / stored_filename
-    stored_file_path.write_bytes(payload)
+    size_bytes = 0
+    first_bytes = bytearray()
+    try:
+        with stored_file_path.open("wb") as stored_file:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                size_bytes += len(chunk)
+                if size_bytes > settings.max_upload_size_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File is too large",
+                    )
+                if len(first_bytes) < 1024:
+                    first_bytes.extend(chunk[: 1024 - len(first_bytes)])
+                stored_file.write(chunk)
 
-    return filename, stored_filename, str(stored_file_path.resolve()), content_type, len(payload)
+        if size_bytes == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is empty",
+            )
+        if b"%PDF-" not in first_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="Uploaded file content is not a PDF",
+            )
+    except Exception:
+        stored_file_path.unlink(missing_ok=True)
+        raise
+
+    return filename, stored_filename, str(stored_file_path.resolve()), content_type, size_bytes
 
 
 def resolve_stored_path(stored_path: str) -> Path:

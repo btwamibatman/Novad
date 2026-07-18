@@ -1,9 +1,12 @@
+from typing import Literal
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     project_name: str = "Document Processing API"
-    environment: str = "development"
+    environment: Literal["development", "production"] = "development"
     database_url: str = "sqlite:///./documents.db"
     storage_dir: str = "storage/uploads"
     max_upload_size_bytes: int = 10 * 1024 * 1024
@@ -31,6 +34,16 @@ class Settings(BaseSettings):
     layout_review_max_inline_bytes: int = 12 * 1024 * 1024
     ocr_languages: str = "rus+kaz+eng"
     ocr_min_text_signal_chars: int = 30
+
+    @model_validator(mode="after")
+    def use_host_only_cookie_name_in_production(self) -> "Settings":
+        if self.is_production and not self.session_cookie_name.startswith("__Host-"):
+            self.session_cookie_name = f"__Host-{self.session_cookie_name}"
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
 
     model_config = SettingsConfigDict(
         env_file=".env",

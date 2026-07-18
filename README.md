@@ -127,6 +127,13 @@ in through the same page. Development cookies work over `http://localhost`; prod
 cookies require HTTPS. Authentication is not bypassed in development. If convenient,
 set a longer local-only `SESSION_TTL_MINUTES` in `.env` instead of disabling auth.
 
+Keep `ENVIRONMENT=development` in the local `.env`. On an HTTPS production server,
+set `ENVIRONMENT=production`; the session cookie then uses the host-only
+`__Host-document_session` name together with `Secure`, `HttpOnly`, `SameSite=Lax`
+and `Path=/`. Unsupported environment names fail configuration validation. Do not
+enable production mode over local HTTP because browsers will not return a `Secure`
+cookie over an unencrypted connection.
+
 ## Seed Data
 
 Create one processed sample PDF document:

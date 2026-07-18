@@ -17,7 +17,7 @@ def set_session_cookie(response: Response, token: str) -> None:
         max_age=settings.session_ttl_minutes * 60,
         httponly=True,
         samesite="lax",
-        secure=settings.environment != "development",
+        secure=settings.is_production,
         path="/",
     )
 
@@ -26,7 +26,7 @@ def delete_session_cookie(response: Response) -> None:
     response.delete_cookie(
         settings.session_cookie_name,
         path="/",
-        secure=settings.environment != "development",
+        secure=settings.is_production,
         httponly=True,
         samesite="lax",
     )

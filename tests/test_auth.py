@@ -106,7 +106,9 @@ def test_login_sets_opaque_http_only_cookie(anonymous_client):
     assert "document_session=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "SameSite=lax" in set_cookie
+    assert "Path=/" in set_cookie
     assert "Secure" not in set_cookie
+    assert "Domain=" not in set_cookie
 
     raw_token = response.cookies["document_session"]
     db = TestingSessionLocal()
@@ -155,6 +157,7 @@ def test_logout_revokes_server_session(client):
 def test_production_login_cookie_is_secure(anonymous_client, monkeypatch):
     add_user("admin", "strong password")
     monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "session_cookie_name", "__Host-document_session")
 
     response = anonymous_client.post(
         "/api/auth/login",
@@ -162,7 +165,29 @@ def test_production_login_cookie_is_secure(anonymous_client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert "Secure" in response.headers["set-cookie"]
+    set_cookie = response.headers["set-cookie"]
+    assert "__Host-document_session=" in set_cookie
+    assert "Secure" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Path=/" in set_cookie
+    assert "Domain=" not in set_cookie
+
+    raw_token = response.cookies["__Host-document_session"]
+    logout_response = anonymous_client.post(
+        "/api/auth/logout",
+        headers={"Cookie": f"__Host-document_session={raw_token}"},
+    )
+
+    assert logout_response.status_code == 204
+    deleted_cookie = logout_response.headers["set-cookie"]
+    assert "__Host-document_session=" in deleted_cookie
+    assert "Max-Age=0" in deleted_cookie
+    assert "Secure" in deleted_cookie
+    assert "HttpOnly" in deleted_cookie
+    assert "SameSite=lax" in deleted_cookie
+    assert "Path=/" in deleted_cookie
+    assert "Domain=" not in deleted_cookie
 
 
 def test_login_rate_limit_blocks_repeated_attempts(anonymous_client):

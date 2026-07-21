@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     storage_dir: str = "storage/uploads"
     max_upload_size_bytes: int = 10 * 1024 * 1024
     max_request_size_bytes: int = 11 * 1024 * 1024
+    max_pdf_pages: int = 100
     session_cookie_name: str = "document_session"
     session_ttl_minutes: int = 120
     session_cleanup_interval_seconds: int = 900
@@ -55,6 +56,8 @@ class Settings(BaseSettings):
                 "MAX_REQUEST_SIZE_BYTES must be greater than MAX_UPLOAD_SIZE_BYTES "
                 "to allow multipart overhead"
             )
+        if self.max_pdf_pages <= 0:
+            raise ValueError("MAX_PDF_PAGES must be greater than zero")
         if self.is_production and not self.session_cookie_name.startswith("__Host-"):
             self.session_cookie_name = f"__Host-{self.session_cookie_name}"
         return self

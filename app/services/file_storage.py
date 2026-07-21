@@ -4,6 +4,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from app.core.config import settings
 
@@ -11,6 +13,35 @@ CONTENT_TYPES_BY_EXTENSION = {
     ".pdf": "application/pdf",
 }
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def validate_pdf(stored_file_path: Path) -> None:
+    try:
+        reader = PdfReader(str(stored_file_path))
+        if reader.is_encrypted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password-protected PDF files are not supported",
+            )
+        page_count = len(reader.pages)
+    except HTTPException:
+        raise
+    except (PdfReadError, OSError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Uploaded file is not a valid PDF",
+        ) from error
+
+    if page_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF must contain at least one page",
+        )
+    if page_count > settings.max_pdf_pages:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"PDF exceeds the {settings.max_pdf_pages}-page limit",
+        )
 
 
 def clean_filename(filename: str | None) -> str:
@@ -68,11 +99,12 @@ async def save_upload(file: UploadFile) -> tuple[str, str, str, str, int]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded file is empty",
             )
-        if b"%PDF-" not in first_bytes:
+        if not first_bytes.startswith(b"%PDF-"):
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                 detail="Uploaded file content is not a PDF",
             )
+        validate_pdf(stored_file_path)
     except Exception:
         stored_file_path.unlink(missing_ok=True)
         raise

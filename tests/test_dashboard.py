@@ -1,7 +1,7 @@
 from tests.pdf_helpers import make_pdf_with_text
 
 
-def test_dashboard_summary_returns_document_metrics(client, other_client):
+def test_dashboard_summary_returns_document_metrics(client, other_client, monkeypatch):
     first = client.post(
         "/api/documents/upload",
         files={
@@ -22,13 +22,22 @@ def test_dashboard_summary_returns_document_metrics(client, other_client):
         files={
             "file": (
                 "broken.pdf",
-                b"%PDF-1.7\nnot a valid PDF structure",
+                make_pdf_with_text("This valid PDF will simulate an analysis failure."),
                 "application/pdf",
             )
         },
     )
     assert second.status_code == 201
-    client.post(f"/api/documents/{second.json()['id']}/analyze")
+
+    def fail_extraction(document):
+        raise ValueError("Simulated analysis failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "app.api.routes.documents.extract_text_pages",
+            fail_extraction,
+        )
+        client.post(f"/api/documents/{second.json()['id']}/analyze")
 
     other = other_client.post(
         "/api/documents/upload",

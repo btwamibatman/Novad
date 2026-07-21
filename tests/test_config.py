@@ -48,3 +48,8 @@ def test_request_limit_must_allow_multipart_overhead():
             max_upload_size_bytes=1024,
             max_request_size_bytes=1024,
         )
+
+
+def test_pdf_page_limit_must_be_positive():
+    with pytest.raises(ValidationError, match="MAX_PDF_PAGES must be greater than zero"):
+        Settings(_env_file=None, max_pdf_pages=0)

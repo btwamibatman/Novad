@@ -25,6 +25,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://document_api_user:document_api_password@db:5432/document_api}
       STORAGE_DIR: ${STORAGE_DIR:-storage/uploads}
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-10485760}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-100}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-document_session}
       SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-120}
       SESSION_CLEANUP_INTERVAL_SECONDS: ${SESSION_CLEANUP_INTERVAL_SECONDS:-900}

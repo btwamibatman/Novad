@@ -67,6 +67,42 @@ def test_reject_pdf_extension_with_non_pdf_content(client):
     assert list(Path(settings.storage_dir).iterdir()) == []
 
 
+def test_reject_corrupted_pdf_during_upload(client):
+    response = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "broken.pdf",
+                b"%PDF-1.7\nnot a valid PDF structure",
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"] == "Uploaded file is not a valid PDF"
+    assert list(Path(settings.storage_dir).iterdir()) == []
+
+
+def test_reject_pdf_over_page_limit(client, monkeypatch):
+    monkeypatch.setattr(settings, "max_pdf_pages", 2)
+
+    response = client.post(
+        "/api/documents/upload",
+        files={
+            "file": (
+                "too-many-pages.pdf",
+                make_pdf_without_text(page_count=3),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "PDF exceeds the 2-page limit"
+    assert list(Path(settings.storage_dir).iterdir()) == []
+
+
 def test_reject_oversized_pdf_without_leaving_partial_file(client, monkeypatch):
     monkeypatch.setattr(settings, "max_upload_size_bytes", 8)
 
@@ -594,25 +630,6 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
     assert data["layout_review_meta"]["adaptive_dpi"] is False
     assert data["layout_review_meta"]["requested_dpi"] == 150
     assert data["layout_review_meta"]["external_processing"] is True
-
-
-def test_layout_review_rejects_corrupted_pdf_as_input_error(client):
-    upload = client.post(
-        "/api/documents/upload",
-        files={
-            "file": (
-                "broken.pdf",
-                b"%PDF-1.7\nnot a valid PDF structure",
-                "application/pdf",
-            )
-        },
-    )
-    assert upload.status_code == 201
-
-    response = client.post(f"/api/documents/{upload.json()['id']}/layout-review")
-
-    assert response.status_code == 400
-    assert "invalid or corrupted" in response.json()["detail"]
 
 
 def test_delete_document_removes_database_record_and_file(client):

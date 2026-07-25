@@ -11,8 +11,9 @@ alembic upgrade head
 ```
 
 The migration chain adds browser sessions, document chunks, content/layout review
-fields and extraction-quality metadata. Existing documents are preserved and assigned
-to a generated legacy session during the first upgrade.
+fields, extraction-quality metadata, analysis progress, chunk confidence/table
+metadata, privacy summary metadata and the DB-backed `analysis_jobs` table. Existing
+documents remain readable with safe defaults.
 
 ## Create a new migration
 

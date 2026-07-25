@@ -48,8 +48,35 @@ services:
       AI_CHAT_TIMEOUT_SECONDS: ${AI_CHAT_TIMEOUT_SECONDS:-20}
       OCR_LANGUAGES: ${OCR_LANGUAGES:-rus+kaz+eng}
       OCR_MIN_TEXT_SIGNAL_CHARS: ${OCR_MIN_TEXT_SIGNAL_CHARS:-30}
+      OCR_RENDER_DPI: ${OCR_RENDER_DPI:-300}
+      OCR_MIN_RENDER_DPI: ${OCR_MIN_RENDER_DPI:-180}
+      OCR_MAX_PIXELS_PER_PAGE: ${OCR_MAX_PIXELS_PER_PAGE:-20000000}
+      OCR_PAGE_TIMEOUT_SECONDS: ${OCR_PAGE_TIMEOUT_SECONDS:-45}
+      PII_MASKING_ENABLED: ${PII_MASKING_ENABLED:-true}
+      PII_NER_LANGUAGES: ${PII_NER_LANGUAGES:-kk,ru,en}
+      PII_MODEL_DIR: ${PII_MODEL_DIR:-/opt/stanza_resources}
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./storage:/app/storage
+
+  analysis-worker:
+    build: .
+    command: ["python", "-m", "app.analysis_worker"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://document_api_user:document_api_password@db:5432/document_api}
+      STORAGE_DIR: ${STORAGE_DIR:-storage/uploads}
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-rus+kaz+eng}
+      OCR_RENDER_DPI: ${OCR_RENDER_DPI:-300}
+      OCR_MIN_RENDER_DPI: ${OCR_MIN_RENDER_DPI:-180}
+      OCR_MAX_PIXELS_PER_PAGE: ${OCR_MAX_PIXELS_PER_PAGE:-20000000}
+      OCR_PAGE_TIMEOUT_SECONDS: ${OCR_PAGE_TIMEOUT_SECONDS:-45}
+      ANALYSIS_WORKER_POLL_SECONDS: ${ANALYSIS_WORKER_POLL_SECONDS:-1}
     depends_on:
       db:
         condition: service_healthy

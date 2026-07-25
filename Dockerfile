@@ -4,21 +4,23 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV STANZA_RESOURCES_DIR=/opt/stanza_resources
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         fonts-noto \
-        ghostscript \
-        qpdf \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-kaz \
+        tesseract-ocr-osd \
         tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
+
+RUN python -c "import stanza; [stanza.download(lang, model_dir='/opt/stanza_resources', processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
 
 COPY . .
 

@@ -60,10 +60,10 @@ Example response:
 | POST | `/api/documents/upload` | Upload a PDF document | `multipart/form-data` with `file` |
 | GET | `/api/documents` | List documents | None |
 | GET | `/api/documents/{document_id}` | Get one document by id | None |
-| POST | `/api/documents/{document_id}/analyze` | Extract text and compute language, word count and character count | None |
+| POST | `/api/documents/{document_id}/analyze` | Idempotently enqueue background analysis | None |
 | POST | `/api/documents/{document_id}/summarize` | Generate AI summary for an already processed document | None |
 | POST | `/api/documents/{document_id}/content-review` | Review extracted text | JSON: `{"mode":"quick"}` or `{"mode":"thorough"}` |
-| POST | `/api/documents/{document_id}/layout-review` | Visually review selected PDF pages | None |
+| POST | `/api/documents/{document_id}/layout-review` | Visually review selected PDF pages | JSON: `{"consent_to_external_image_processing":true}` |
 | POST | `/api/documents/{document_id}/ask` | Ask a question about relevant extracted chunks | JSON question and history |
 | GET | `/api/documents/{document_id}/download` | Download the stored file | None |
 | DELETE | `/api/documents/{document_id}` | Delete document metadata and stored file | None |
@@ -93,7 +93,9 @@ Content and layout review examples:
 curl -X POST http://localhost:8000/api/documents/1/content-review \
   -H "Content-Type: application/json" \
   -d '{"mode":"quick"}'
-curl -X POST http://localhost:8000/api/documents/1/layout-review
+curl -X POST http://localhost:8000/api/documents/1/layout-review \
+  -H "Content-Type: application/json" \
+  -d '{"consent_to_external_image_processing":true}'
 ```
 
 Document response example:
@@ -105,6 +107,7 @@ Document response example:
   "content_type": "application/pdf",
   "size_bytes": 73,
   "status": "processed",
+  "analysis_progress": {},
   "extracted_text": "This document contains enough English text for language detection.",
   "extraction_quality": "high",
   "extraction_quality_meta": {"heuristic": true, "requires_manual_review": false},
@@ -115,6 +118,10 @@ Document response example:
   "ai_summary": "A short summary of the uploaded document.",
   "ai_model": "gemini-2.5-flash",
   "ai_error": null,
+  "ai_summary_meta": {
+    "provider": "gemini",
+    "privacy": {"applied": true, "entity_count": 2, "categories": {"PERSON": 1, "DATE": 1}}
+  },
   "content_review": "The document needs two language corrections.",
   "content_review_model": "gemini-2.5-flash",
   "content_review_error": null,
@@ -133,7 +140,10 @@ Document response example:
 
 Successful upload requests return HTTP 201 and the created document metadata.
 
-Successful analyze and summarize requests return HTTP 200 and the updated document.
+Analyze returns HTTP 202 with status `analyzing`; poll
+`GET /api/documents/{document_id}` until status becomes `processed` or `failed`.
+Repeated analyze requests reuse the pending/running DB job. Summary and review
+requests return HTTP 200 when successful.
 
 Successful delete requests return HTTP 204 with an empty response body.
 
@@ -176,5 +186,8 @@ If Gemini is not configured, summary generation returns HTTP 503:
   "detail": "GEMINI_API_KEY is not configured"
 }
 ```
+
+Layout review without explicit image-processing consent returns HTTP 400. If local
+PII NER is unavailable, text AI operations return HTTP 503 without sending raw text.
 
 FastAPI returns HTTP 422 with validation details when path parameters or request data are invalid.

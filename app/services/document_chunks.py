@@ -20,6 +20,9 @@ class ChunkLike(Protocol):
     page_number: int | None
     text: str
     extraction_method: str
+    extraction_quality: str
+    confidence: float | None
+    uncertain_region_count: int
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,10 @@ class DocumentChunkAnalysis:
     chunk_index: int
     text: str
     extraction_method: str
+    extraction_quality: str
+    confidence: float | None
+    table_count: int
+    uncertain_region_count: int
     detected_language: str | None
     word_count: int
     char_count: int
@@ -78,6 +85,10 @@ def build_document_chunks(pages: Iterable[ExtractedPage]) -> list[DocumentChunkA
                     chunk_index=chunk_index,
                     text=chunk_text,
                     extraction_method=page.extraction_method,
+                    extraction_quality=page.extraction_quality,
+                    confidence=page.confidence,
+                    table_count=page.table_count,
+                    uncertain_region_count=page.uncertain_region_count,
                     detected_language=detected_language,
                     word_count=word_count,
                     char_count=char_count,
@@ -161,8 +172,16 @@ def format_chunks_for_context(chunks: Iterable[ChunkLike]) -> str:
     for chunk in chunks:
         page = f"page {chunk.page_number}" if chunk.page_number is not None else "document"
         extraction_method = getattr(chunk, "extraction_method", "unknown")
+        extraction_quality = getattr(chunk, "extraction_quality", "unknown")
+        confidence = getattr(chunk, "confidence", None)
+        uncertain_regions = getattr(chunk, "uncertain_region_count", 0)
+        confidence_label = (
+            f"{float(confidence):.1f}" if confidence is not None else "n/a"
+        )
         parts.append(
-            f"[chunk {chunk.chunk_index}, {page}, extraction={extraction_method}]\n"
+            f"[chunk {chunk.chunk_index}, {page}, extraction={extraction_method}, "
+            f"quality={extraction_quality}, confidence={confidence_label}, "
+            f"uncertain_regions={uncertain_regions}]\n"
             f"{chunk.text.strip()}"
         )
     return "\n\n".join(parts)

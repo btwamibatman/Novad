@@ -84,3 +84,31 @@ def test_summarize_chunks_uses_map_reduce(monkeypatch):
     assert "response 1" in calls[2]
     assert "response 2" in calls[2]
     assert all("Качество извлечения текста: medium" in prompt for prompt in calls)
+
+
+def test_summarize_chunks_reduces_hierarchically_without_truncating(monkeypatch):
+    calls = []
+
+    class FakeProvider:
+        def generate_text(self, prompt, **kwargs):
+            calls.append(prompt)
+            return AIGenerationResult(
+                text=f"short-{len(calls)}",
+                model="test-model",
+            )
+
+    monkeypatch.setattr(ai_summary.settings, "ai_summary_max_chars", 45)
+    monkeypatch.setattr(ai_summary, "get_ai_provider", lambda: FakeProvider())
+
+    summary, _ = ai_summary.summarize_chunks(
+        ["first source", "second source", "third source", "fourth source"],
+        "medium",
+    )
+
+    map_prompts = calls[:4]
+    assert all(source in prompt for source, prompt in zip(
+        ["first source", "second source", "third source", "fourth source"],
+        map_prompts,
+    ))
+    assert len(calls) > 5
+    assert summary == f"short-{len(calls)}"

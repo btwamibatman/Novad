@@ -14,6 +14,7 @@ from app.crud.user import create_user
 from app.main import app
 from app.services.password_hashing import hash_password
 from app.services.rate_limit import _buckets
+from app.services.analysis_jobs import run_next_analysis_job
 from tests.pdf_helpers import make_pdf_with_text
 
 TEST_DATABASE_URL = "sqlite://"
@@ -42,8 +43,10 @@ def override_get_db() -> Generator[Session, None, None]:
 @pytest.fixture(autouse=True)
 def reset_database(tmp_path) -> Generator[None, None, None]:
     original_environment = settings.environment
+    original_pii_masking_enabled = settings.pii_masking_enabled
     settings.storage_dir = str(tmp_path / "uploads")
     settings.environment = "development"
+    settings.pii_masking_enabled = False
     _buckets.clear()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -51,6 +54,7 @@ def reset_database(tmp_path) -> Generator[None, None, None]:
     Base.metadata.drop_all(bind=engine)
     _buckets.clear()
     settings.environment = original_environment
+    settings.pii_masking_enabled = original_pii_masking_enabled
     shutil.rmtree(settings.storage_dir, ignore_errors=True)
 
 
@@ -114,3 +118,12 @@ def pdf_document_id(client: TestClient) -> int:
     )
     assert response.status_code == 201
     return response.json()["id"]
+
+
+@pytest.fixture()
+def analysis_runner():
+    def run_all() -> None:
+        while run_next_analysis_job(TestingSessionLocal):
+            pass
+
+    return run_all

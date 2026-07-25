@@ -195,11 +195,14 @@ def test_upload_rejects_session_storage_quota(client, monkeypatch):
     assert response.json()["detail"]["message"] == "Session storage quota exceeded"
 
 
-def test_analyze_pdf_document(client, pdf_document_id):
+def test_analyze_pdf_document(client, pdf_document_id, analysis_runner):
     response = client.post(f"/api/documents/{pdf_document_id}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    assert response.json()["status"] == "analyzing"
+    assert response.json()["analysis_progress"]["stage"] == "queued"
+    analysis_runner()
+    data = client.get(f"/api/documents/{pdf_document_id}").json()
     assert data["status"] == "processed"
     assert data["detected_language"] == "en"
     assert data["language_distribution"] == {"en": 1.0}
@@ -207,6 +210,82 @@ def test_analyze_pdf_document(client, pdf_document_id):
     assert "English text" in data["extracted_text"]
     assert data["extraction_quality"] == "high"
     assert data["extraction_quality_meta"]["requires_manual_review"] is False
+
+
+def test_analyze_is_idempotent_while_job_is_pending(
+    client,
+    pdf_document_id,
+    analysis_runner,
+    monkeypatch,
+):
+    calls = 0
+
+    def fake_extract(document, progress_callback=None):
+        nonlocal calls
+        calls += 1
+        return [
+            text_analysis.ExtractedPage(
+                1,
+                "Idempotent background analysis contains enough English text.",
+                "native",
+                "high",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages",
+        fake_extract,
+    )
+
+    first = client.post(f"/api/documents/{pdf_document_id}/analyze")
+    second = client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert calls == 1
+    assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "processed"
+
+
+def test_failed_analysis_job_can_be_retried(
+    client,
+    pdf_document_id,
+    analysis_runner,
+    monkeypatch,
+):
+    calls = 0
+
+    def fake_extract(document, progress_callback=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise text_analysis.OCRExtractionError("temporary OCR failure")
+        return [
+            text_analysis.ExtractedPage(
+                1,
+                "Retried background analysis contains enough English text.",
+                "native",
+                "high",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages",
+        fake_extract,
+    )
+
+    client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
+    assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "failed"
+
+    retry = client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
+
+    assert retry.status_code == 202
+    assert calls == 2
+    assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "processed"
+
+
 def test_summarize_requires_processed_document(client, pdf_document_id):
     response = client.post(f"/api/documents/{pdf_document_id}/summarize")
 
@@ -214,8 +293,11 @@ def test_summarize_requires_processed_document(client, pdf_document_id):
     assert response.json()["detail"] == "Document must be analyzed first"
 
 
-def test_summarize_processed_document(client, pdf_document_id, monkeypatch):
+def test_summarize_processed_document(
+    client, pdf_document_id, monkeypatch, analysis_runner
+):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
 
     def fake_summarize_text(text: str, extraction_quality: str) -> tuple[str, str]:
         assert "English text" in text
@@ -246,8 +328,11 @@ def test_ask_requires_processed_document(client, pdf_document_id):
     assert response.json()["detail"] == "Document must be analyzed first"
 
 
-def test_ask_processed_document(client, pdf_document_id, monkeypatch):
+def test_ask_processed_document(
+    client, pdf_document_id, monkeypatch, analysis_runner
+):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
 
     def fake_answer_document_question(
         text: str,
@@ -279,10 +364,14 @@ def test_ask_processed_document(client, pdf_document_id, monkeypatch):
         "answer": "The document is in English.",
         "model": "test-gemini",
         "truncated_context": False,
+        "privacy_applied": False,
+        "masked_entity_count": 0,
     }
 
 
-def test_ask_processed_document_uses_relevant_chunk(client, monkeypatch):
+def test_ask_processed_document_uses_relevant_chunk(
+    client, monkeypatch, analysis_runner
+):
     early_text = "early section " * 220
     late_text = "specialinvoiceend final amount is forty two. " * 40
     upload = upload_pdf(
@@ -293,6 +382,7 @@ def test_ask_processed_document_uses_relevant_chunk(client, monkeypatch):
     assert upload.status_code == 201
     document_id = upload.json()["id"]
     client.post(f"/api/documents/{document_id}/analyze")
+    analysis_runner()
 
     def fake_answer_document_question(
         text: str,
@@ -331,8 +421,11 @@ def test_ask_rejects_blank_question(client, pdf_document_id):
     assert response.status_code == 422
 
 
-def test_ask_rate_limit_returns_retry_after(client, pdf_document_id, monkeypatch):
+def test_ask_rate_limit_returns_retry_after(
+    client, pdf_document_id, monkeypatch, analysis_runner
+):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
 
     def fake_answer_document_question(
         text: str,
@@ -364,7 +457,7 @@ def test_ask_rate_limit_returns_retry_after(client, pdf_document_id, monkeypatch
     assert response.headers["Retry-After"]
 
 
-def test_analyze_pdf_with_text_layer(client):
+def test_analyze_pdf_with_text_layer(client, analysis_runner):
     pdf_bytes = make_pdf_with_text("This PDF contains extractable English text for analysis.")
     upload = client.post(
         "/api/documents/upload",
@@ -374,14 +467,17 @@ def test_analyze_pdf_with_text_layer(client):
 
     response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    analysis_runner()
+    data = client.get(f"/api/documents/{upload.json()['id']}").json()
     assert data["status"] == "processed"
     assert data["detected_language"] == "en"
     assert "extractable English text" in data["extracted_text"]
 
 
-def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypatch):
+def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(
+    client, monkeypatch, analysis_runner
+):
     pdf_bytes = make_pdf_without_text()
     upload = client.post(
         "/api/documents/upload",
@@ -389,17 +485,26 @@ def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypa
     )
     assert upload.status_code == 201
 
-    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
-        assert input_path.exists()
-        output_path.write_bytes(make_pdf_with_text("OCR fallback extracted English text for analysis."))
-        return 0
+    def fake_extract(document, progress_callback=None):
+        return [
+            text_analysis.ExtractedPage(
+                page_number=1,
+                text="OCR fallback extracted English text for analysis.",
+                extraction_method="ocr",
+                extraction_quality="medium",
+                confidence=91.2,
+            )
+        ]
 
-    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages", fake_extract
+    )
 
     response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    analysis_runner()
+    data = client.get(f"/api/documents/{upload.json()['id']}").json()
     assert data["status"] == "processed"
     assert "OCR fallback extracted English text" in data["extracted_text"]
     assert data["extraction_quality"] == "medium"
@@ -407,87 +512,49 @@ def test_analyze_pdf_uses_ocr_fallback_when_text_layer_is_empty(client, monkeypa
     assert data["extraction_quality_meta"]["manual_review_pages"] == [1]
 
 
-def test_analyze_pdf_batches_weak_pages_for_mixed_pdf(client, monkeypatch):
+def test_analyze_pdf_batches_weak_pages_for_mixed_pdf(
+    client, monkeypatch, analysis_runner
+):
     pdf_bytes = make_pdf_with_text_and_blank_pages("First page has extractable English text.")
     upload = client.post(
         "/api/documents/upload",
         files={"file": ("mixed.pdf", pdf_bytes, "application/pdf")},
     )
     assert upload.status_code == 201
-    ocr_inputs = []
+    def fake_extract(document, progress_callback=None):
+        return [
+            text_analysis.ExtractedPage(
+                1, "First page has extractable English text.", "native", "high"
+            ),
+            text_analysis.ExtractedPage(
+                2,
+                "| Work | Status |\n| --- | --- |\n| Second page OCR English text | Done |",
+                "ocr_table",
+                "medium",
+                88.0,
+                1,
+                0,
+            ),
+        ]
 
-    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
-        ocr_inputs.append(input_path)
-        assert len(PdfReader(str(input_path)).pages) == 1
-        output_path.write_bytes(make_pdf_with_text("Second page OCR English text."))
-        return 0
-
-    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages", fake_extract
+    )
 
     response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    analysis_runner()
+    data = client.get(f"/api/documents/{upload.json()['id']}").json()
     assert data["status"] == "processed"
     assert "First page has extractable English text" in data["extracted_text"]
     assert "Second page OCR English text" in data["extracted_text"]
-    assert len(ocr_inputs) == 1
+    assert data["extraction_quality_meta"]["pages"][1]["table_count"] == 1
 
 
-def test_analyze_pdf_sends_multiple_weak_pages_to_one_ocr_batch(client, monkeypatch):
-    pdf_bytes = make_pdf_with_text_and_blank_pages(
-        "First page has extractable English text.",
-        blank_page_count=2,
-    )
-    upload = client.post(
-        "/api/documents/upload",
-        files={"file": ("mixed.pdf", pdf_bytes, "application/pdf")},
-    )
-    assert upload.status_code == 201
-    ocr_call_count = 0
-
-    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
-        nonlocal ocr_call_count
-        ocr_call_count += 1
-        assert len(PdfReader(str(input_path)).pages) == 2
-        output_path.write_bytes(
-            make_pdf_with_text_and_blank_pages(
-                "Second page OCR English text.",
-                blank_page_count=1,
-            )
-        )
-        return 0
-
-    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
-
-    response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "processed"
-    assert ocr_call_count == 1
-
-
-def test_run_ocr_uses_configured_russian_kazakh_english_languages(tmp_path, monkeypatch):
-    input_path = tmp_path / "input.pdf"
-    output_path = tmp_path / "output.pdf"
-    input_path.write_bytes(make_pdf_without_text())
-    captured_kwargs = {}
-
-    def fake_ocr(input_file, output_file, **kwargs):
-        captured_kwargs.update(kwargs)
-        Path(output_file).write_bytes(make_pdf_with_text("OCR fallback extracted English text for analysis."))
-        return 0
-
-    monkeypatch.setattr(text_analysis.settings, "ocr_languages", "rus+kaz+eng")
-    monkeypatch.setitem(sys.modules, "ocrmypdf", SimpleNamespace(ocr=fake_ocr))
-
-    assert text_analysis.run_ocr(input_path, output_path) == 0
-    assert captured_kwargs["language"] == ("rus", "kaz", "eng")
-    assert captured_kwargs["force_ocr"] is True
-    assert "skip_text" not in captured_kwargs
-
-
-def test_analyze_pdf_reports_ocr_exit_failure(client, monkeypatch):
+def test_analyze_pdf_reports_ocr_exit_failure(
+    client, monkeypatch, analysis_runner
+):
     pdf_bytes = make_pdf_without_text()
     upload = client.post(
         "/api/documents/upload",
@@ -495,21 +562,26 @@ def test_analyze_pdf_reports_ocr_exit_failure(client, monkeypatch):
     )
     assert upload.status_code == 201
 
-    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
-        return 2
+    def fake_extract(document, progress_callback=None):
+        raise text_analysis.OCRExtractionError("OCR failed: Tesseract timed out")
 
-    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages", fake_extract
+    )
 
     response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    analysis_runner()
+    data = client.get(f"/api/documents/{upload.json()['id']}").json()
     assert data["status"] == "failed"
     assert data["extraction_quality"] == "unknown"
-    assert data["error_message"] == "OCR failed: OCR engine exited with code 2"
+    assert data["error_message"] == "OCR failed: Tesseract timed out"
 
 
-def test_analyze_pdf_reports_no_text_after_ocr(client, monkeypatch):
+def test_analyze_pdf_reports_no_text_after_ocr(
+    client, monkeypatch, analysis_runner
+):
     pdf_bytes = make_pdf_without_text()
     upload = client.post(
         "/api/documents/upload",
@@ -517,16 +589,26 @@ def test_analyze_pdf_reports_no_text_after_ocr(client, monkeypatch):
     )
     assert upload.status_code == 201
 
-    def fake_run_ocr(input_path: Path, output_path: Path) -> int:
-        output_path.write_bytes(make_pdf_without_text())
-        return 0
+    def fake_extract(document, progress_callback=None):
+        return [
+            text_analysis.ExtractedPage(
+                page_number=1,
+                text="",
+                extraction_method="ocr",
+                extraction_quality="low",
+                confidence=0.0,
+            )
+        ]
 
-    monkeypatch.setattr("app.services.text_analysis.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages", fake_extract
+    )
 
     response = client.post(f"/api/documents/{upload.json()['id']}/analyze")
 
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 202
+    analysis_runner()
+    data = client.get(f"/api/documents/{upload.json()['id']}").json()
     assert data["status"] == "failed"
     assert "no readable text was found after OCR" in data["error_message"]
 
@@ -549,12 +631,15 @@ def test_content_review_requires_processed_document(client, pdf_document_id):
     assert response.json()["detail"] == "Document must be analyzed first"
 
 
-def test_content_review_persists_result(client, pdf_document_id, monkeypatch):
+def test_content_review_persists_result(
+    client, pdf_document_id, monkeypatch, analysis_runner
+):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
 
     def fake_review(chunks, mode):
         assert chunks
-        assert chunks[0].extraction_method == "pypdf"
+        assert chunks[0].extraction_method == "native"
         assert mode == "thorough"
         return ai_content_review.ContentReviewResult(
             text="The document needs two language corrections.",
@@ -585,8 +670,11 @@ def test_content_review_persists_result(client, pdf_document_id, monkeypatch):
     assert data["content_review_meta"]["requires_manual_review"] is False
 
 
-def test_content_review_reports_synchronous_size_limit(client, pdf_document_id, monkeypatch):
+def test_content_review_reports_synchronous_size_limit(
+    client, pdf_document_id, monkeypatch, analysis_runner
+):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
+    analysis_runner()
 
     def fake_review(chunks, mode):
         raise ai_content_review.ContentReviewTooLarge("Use quick review")
@@ -618,7 +706,10 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
 
     monkeypatch.setattr(ai_layout_review, "review_pdf_layout", fake_review)
 
-    response = client.post(f"/api/documents/{pdf_document_id}/layout-review")
+    response = client.post(
+        f"/api/documents/{pdf_document_id}/layout-review",
+        json={"consent_to_external_image_processing": True},
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -630,6 +721,26 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
     assert data["layout_review_meta"]["adaptive_dpi"] is False
     assert data["layout_review_meta"]["requested_dpi"] == 150
     assert data["layout_review_meta"]["external_processing"] is True
+    assert data["layout_review_meta"]["external_image_processing_consent"] is True
+
+
+def test_layout_review_requires_explicit_external_image_consent(
+    client, pdf_document_id
+):
+    response = client.post(
+        f"/api/documents/{pdf_document_id}/layout-review",
+        json={"consent_to_external_image_processing": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Explicit consent to external image processing is required"
+    )
+
+    missing_body = client.post(
+        f"/api/documents/{pdf_document_id}/layout-review"
+    )
+    assert missing_body.status_code == 400
 
 
 def test_delete_document_removes_database_record_and_file(client):

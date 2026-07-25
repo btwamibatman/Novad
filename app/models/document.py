@@ -29,6 +29,7 @@ class Document(Base):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(30), default="uploaded", nullable=False)
+    analysis_progress: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     extracted_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     extraction_quality: Mapped[str] = mapped_column(
         String(20), default="unknown", nullable=False
@@ -42,6 +43,7 @@ class Document(Base):
     ai_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ai_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary_meta: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     content_review: Mapped[str] = mapped_column(Text, default="", nullable=False)
     content_review_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     content_review_error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -33,3 +33,5 @@ class AIChatResponse(BaseModel):
     answer: str
     model: str
     truncated_context: bool
+    privacy_applied: bool = False
+    masked_entity_count: int = 0

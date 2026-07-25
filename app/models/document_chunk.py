@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -22,6 +22,14 @@ class DocumentChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     extraction_method: Mapped[str] = mapped_column(String(20), default="unknown", nullable=False)
+    extraction_quality: Mapped[str] = mapped_column(
+        String(20), default="unknown", nullable=False
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    table_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    uncertain_region_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
     detected_language: Mapped[str | None] = mapped_column(String(20), nullable=True)
     word_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

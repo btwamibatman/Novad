@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
+from app.models.analysis_job import AnalysisJob
 
 
 class DocumentChunkPayload:
@@ -12,6 +13,10 @@ class DocumentChunkPayload:
     chunk_index: int
     text: str
     extraction_method: str
+    extraction_quality: str
+    confidence: float | None
+    table_count: int
+    uncertain_region_count: int
     detected_language: str | None
     word_count: int
     char_count: int
@@ -104,6 +109,8 @@ def update_document_analysis(
     db_document.extraction_quality = extraction_quality
     db_document.extraction_quality_meta = extraction_quality_meta or {}
     db_document.status = status
+    if status in {"processed", "failed"}:
+        db_document.analysis_progress = {}
     db_document.detected_language = detected_language
     if language_distribution is not None:
         db_document.language_distribution = language_distribution
@@ -113,6 +120,7 @@ def update_document_analysis(
     db_document.ai_summary = ""
     db_document.ai_model = None
     db_document.ai_error = None
+    db_document.ai_summary_meta = {}
     db_document.content_review = ""
     db_document.content_review_model = None
     db_document.content_review_error = None
@@ -128,6 +136,10 @@ def update_document_analysis(
                 chunk_index=chunk.chunk_index,
                 text=chunk.text,
                 extraction_method=chunk.extraction_method,
+                extraction_quality=chunk.extraction_quality,
+                confidence=chunk.confidence,
+                table_count=chunk.table_count,
+                uncertain_region_count=chunk.uncertain_region_count,
                 detected_language=chunk.detected_language,
                 word_count=chunk.word_count,
                 char_count=chunk.char_count,
@@ -147,10 +159,13 @@ def update_document_summary(
     ai_summary: str,
     ai_model: str | None,
     ai_error: str | None = None,
+    ai_summary_meta: dict | None = None,
 ) -> Document:
     db_document.ai_summary = ai_summary
     db_document.ai_model = ai_model
     db_document.ai_error = ai_error
+    if ai_summary_meta is not None:
+        db_document.ai_summary_meta = ai_summary_meta
     db.commit()
     db.refresh(db_document)
     return db_document
@@ -197,6 +212,7 @@ def update_document_layout_review(
 
 
 def delete_document(db: Session, db_document: Document) -> None:
+    db.execute(delete(AnalysisJob).where(AnalysisJob.document_id == db_document.id))
     db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == db_document.id))
     db.delete(db_document)
     db.commit()

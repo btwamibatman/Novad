@@ -11,22 +11,23 @@ from app.models.document import Document
 from app.models._utils import utc_now
 from app.models.session import UserSession
 from app.schemas.ai_chat import AIChatRequest, AIChatResponse
-from app.schemas.document import DocumentRead, DocumentReviewRequest
+from app.schemas.document import (
+    DocumentLayoutReviewRequest,
+    DocumentRead,
+    DocumentReviewRequest,
+)
 from app.services.file_storage import remove_stored_file, resolve_stored_path, save_upload
 from app.services.rate_limit import enforce_rate_limit
 from app.services import ai_content_review, ai_layout_review, ai_summary
-from app.services.document_chunks import (
-    build_document_chunks,
-    format_chunks_for_context,
-    language_distribution,
-    primary_language,
-    select_relevant_chunks,
+from app.services.analysis_jobs import enqueue_analysis
+from app.services.pii_masking import (
+    PIIMaskingError,
+    PIIMaskingSession,
+    PIIMaskingUnavailable,
 )
-from app.services.text_analysis import (
-    analyze_text,
-    assess_extraction_quality,
-    extract_text_pages,
-    join_page_text,
+from app.services.document_chunks import (
+    format_chunks_for_context,
+    select_relevant_chunks,
 )
 
 router = APIRouter()
@@ -85,48 +86,18 @@ def read_document(
     return get_document_or_404(db, document_id, current_session.user_id)
 
 
-@router.post("/{document_id}/analyze", response_model=DocumentRead)
+@router.post(
+    "/{document_id}/analyze",
+    response_model=DocumentRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def analyze_document(
     document_id: int,
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
     db_document = get_document_or_404(db, document_id, current_session.user_id)
-    try:
-        extracted_pages = extract_text_pages(db_document)
-        extracted_text = join_page_text(extracted_pages).strip()
-        _, word_count, char_count = analyze_text(extracted_text)
-        chunks = build_document_chunks(extracted_pages)
-        distribution = language_distribution(chunks)
-        detected_language = primary_language(distribution)
-        extraction_quality = assess_extraction_quality(extracted_pages)
-    except Exception as error:
-        return document_crud.update_document_analysis(
-            db,
-            db_document,
-            status="failed",
-            extracted_text="",
-            extraction_quality="unknown",
-            extraction_quality_meta={},
-            language_distribution={},
-            error_message=str(error),
-            chunks=[],
-        )
-
-    return document_crud.update_document_analysis(
-        db,
-        db_document,
-        status="processed",
-        extracted_text=extracted_text,
-        extraction_quality=extraction_quality.quality,
-        extraction_quality_meta=extraction_quality.meta,
-        detected_language=detected_language,
-        language_distribution=distribution,
-        word_count=word_count,
-        char_count=char_count,
-        error_message=None,
-        chunks=chunks,
-    )
+    return enqueue_analysis(db, db_document)
 
 
 @router.post("/{document_id}/summarize", response_model=DocumentRead)
@@ -144,13 +115,50 @@ async def summarize_document(
         )
 
     chunks = document_crud.get_document_chunks(db, db_document.id)
-    chunk_texts = [chunk.text for chunk in chunks] or [db_document.extracted_text]
+    chunk_texts = (
+        [format_chunks_for_context([chunk]) for chunk in chunks]
+        or [
+            "[document, extraction="
+            f"unknown, quality={db_document.extraction_quality}, confidence=n/a, "
+            "uncertain_regions=0]\n"
+            f"{db_document.extracted_text}"
+        ]
+    )
+    privacy = PIIMaskingSession()
     try:
+        masked_chunk_texts = [privacy.mask(text) for text in chunk_texts]
         summary, model_name = await run_in_threadpool(
             ai_summary.summarize_chunks,
-            chunk_texts,
+            masked_chunk_texts,
             db_document.extraction_quality,
         )
+        summary = privacy.restore(summary)
+    except PIIMaskingUnavailable as error:
+        document_crud.update_document_summary(
+            db,
+            db_document,
+            ai_summary="",
+            ai_model=None,
+            ai_error=str(error),
+            ai_summary_meta={},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except PIIMaskingError as error:
+        document_crud.update_document_summary(
+            db,
+            db_document,
+            ai_summary="",
+            ai_model=None,
+            ai_error=str(error),
+            ai_summary_meta={},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI summary privacy processing failed",
+        ) from error
     except ai_summary.AISummaryNotConfigured as error:
         document_crud.update_document_summary(
             db,
@@ -158,6 +166,7 @@ async def summarize_document(
             ai_summary="",
             ai_model=None,
             ai_error=str(error),
+            ai_summary_meta={},
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -170,6 +179,7 @@ async def summarize_document(
             ai_summary="",
             ai_model=None,
             ai_error=str(error),
+            ai_summary_meta={},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -182,6 +192,7 @@ async def summarize_document(
             ai_summary="",
             ai_model=None,
             ai_error=str(error),
+            ai_summary_meta={},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -194,6 +205,11 @@ async def summarize_document(
         ai_summary=summary,
         ai_model=model_name,
         ai_error=None,
+        ai_summary_meta={
+            "provider": settings.ai_provider,
+            "privacy": privacy.meta.as_dict(),
+            "generated_at": utc_now().isoformat(),
+        },
     )
 
 
@@ -223,14 +239,45 @@ async def review_document_content(
             chunk_index=0,
             page_number=None,
             text=db_document.extracted_text,
+            extraction_quality=db_document.extraction_quality,
         )
     ]
+    privacy = PIIMaskingSession()
     try:
+        masked_review_chunks = [
+            ai_content_review.ReviewChunkData(
+                chunk_index=chunk.chunk_index,
+                page_number=chunk.page_number,
+                text=privacy.mask(chunk.text),
+                extraction_method=getattr(chunk, "extraction_method", "unknown"),
+                extraction_quality=getattr(
+                    chunk, "extraction_quality", "unknown"
+                ),
+                confidence=getattr(chunk, "confidence", None),
+                uncertain_region_count=getattr(
+                    chunk, "uncertain_region_count", 0
+                ),
+            )
+            for chunk in review_chunks
+        ]
         result = await run_in_threadpool(
             ai_content_review.review_document_content,
-            review_chunks,
+            masked_review_chunks,
             payload.mode,
         )
+        review_text = privacy.restore(result.text)
+    except PIIMaskingUnavailable as error:
+        _store_content_review_error(db, db_document, payload.mode, error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except PIIMaskingError as error:
+        _store_content_review_error(db, db_document, payload.mode, error)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI content review privacy processing failed",
+        ) from error
     except ai_content_review.ContentReviewNotConfigured as error:
         _store_content_review_error(db, db_document, payload.mode, error)
         raise HTTPException(
@@ -259,7 +306,7 @@ async def review_document_content(
     return document_crud.update_document_content_review(
         db,
         db_document,
-        content_review=result.text,
+        content_review=review_text,
         content_review_model=result.model,
         content_review_error=None,
         content_review_mode=result.mode,
@@ -279,6 +326,7 @@ async def review_document_content(
                 "requires_manual_review", False
             ),
             "reviewed_at": utc_now().isoformat(),
+            "privacy": privacy.meta.as_dict(),
         },
     )
 
@@ -286,9 +334,15 @@ async def review_document_content(
 @router.post("/{document_id}/layout-review", response_model=DocumentRead)
 async def review_document_layout(
     document_id: int,
+    payload: DocumentLayoutReviewRequest | None = None,
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
+    if payload is None or not payload.consent_to_external_image_processing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Explicit consent to external image processing is required",
+        )
     await enforce_rate_limit(f"user:{current_session.user_id}", "layout-review", limit=5)
     db_document = get_document_or_404(db, document_id, current_session.user_id)
     if db_document.content_type != "application/pdf":
@@ -342,6 +396,7 @@ async def review_document_layout(
             "adaptive_dpi": result.dpi < settings.layout_review_dpi,
             "provider": settings.ai_provider,
             "external_processing": settings.ai_provider.strip().lower() == "gemini",
+            "external_image_processing_consent": True,
             "standard": ai_layout_review.RK_LAYOUT_STANDARD_REFERENCE,
             "standard_source": ai_layout_review.RK_LAYOUT_STANDARD_SOURCE,
             "reviewed_at": utc_now().isoformat(),
@@ -398,16 +453,39 @@ async def ask_document_question(
 
     chunks = document_crud.get_document_chunks(db, db_document.id)
     relevant_chunks = select_relevant_chunks(chunks, payload.question)
-    selected_context = format_chunks_for_context(relevant_chunks) or db_document.extracted_text
+    selected_context = format_chunks_for_context(relevant_chunks) or (
+        "[document, extraction=unknown, "
+        f"quality={db_document.extraction_quality}, confidence=n/a, "
+        "uncertain_regions=0]\n"
+        f"{db_document.extracted_text}"
+    )
     history = [message.model_dump() for message in payload.history[-12:]]
+    privacy = PIIMaskingSession()
     try:
+        masked_context = privacy.mask(selected_context)
+        masked_question = privacy.mask(payload.question)
+        masked_history = [
+            {**message, "content": privacy.mask(message["content"])}
+            for message in history
+        ]
         answer, model_name, truncated_context = await run_in_threadpool(
             ai_summary.answer_document_question,
-            selected_context,
-            payload.question,
-            history,
+            masked_context,
+            masked_question,
+            masked_history,
             db_document.extraction_quality,
         )
+        answer = privacy.restore(answer)
+    except PIIMaskingUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except PIIMaskingError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI question privacy processing failed",
+        ) from error
     except ai_summary.AISummaryNotConfigured as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -428,6 +506,8 @@ async def ask_document_question(
         answer=answer,
         model=model_name,
         truncated_context=truncated_context,
+        privacy_applied=privacy.meta.applied,
+        masked_entity_count=privacy.meta.entity_count,
     )
 
 

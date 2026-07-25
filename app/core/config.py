@@ -37,6 +37,19 @@ class Settings(BaseSettings):
     layout_review_max_inline_bytes: int = 12 * 1024 * 1024
     ocr_languages: str = "rus+kaz+eng"
     ocr_min_text_signal_chars: int = 30
+    ocr_render_dpi: int = 300
+    ocr_min_render_dpi: int = 180
+    ocr_max_pixels_per_page: int = 20_000_000
+    ocr_min_mean_confidence: float = 70.0
+    ocr_high_confidence: float = 85.0
+    ocr_low_word_confidence: float = 60.0
+    ocr_max_low_confidence_ratio: float = 0.25
+    ocr_candidate_similarity: float = 0.90
+    ocr_page_timeout_seconds: int = 45
+    analysis_worker_poll_seconds: float = 1.0
+    pii_masking_enabled: bool = True
+    pii_ner_languages: str = "kk,ru,en"
+    pii_model_dir: str = "/opt/stanza_resources"
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
@@ -58,6 +71,18 @@ class Settings(BaseSettings):
             )
         if self.max_pdf_pages <= 0:
             raise ValueError("MAX_PDF_PAGES must be greater than zero")
+        if self.ocr_render_dpi <= 0:
+            raise ValueError("OCR_RENDER_DPI must be greater than zero")
+        if self.ocr_min_render_dpi <= 0 or self.ocr_min_render_dpi > self.ocr_render_dpi:
+            raise ValueError(
+                "OCR_MIN_RENDER_DPI must be positive and not exceed OCR_RENDER_DPI"
+            )
+        if self.ocr_max_pixels_per_page <= 0:
+            raise ValueError("OCR_MAX_PIXELS_PER_PAGE must be greater than zero")
+        if self.ocr_page_timeout_seconds <= 0:
+            raise ValueError("OCR_PAGE_TIMEOUT_SECONDS must be greater than zero")
+        if self.analysis_worker_poll_seconds <= 0:
+            raise ValueError("ANALYSIS_WORKER_POLL_SECONDS must be greater than zero")
         if self.is_production and not self.session_cookie_name.startswith("__Host-"):
             self.session_cookie_name = f"__Host-{self.session_cookie_name}"
         return self
@@ -69,6 +94,14 @@ class Settings(BaseSettings):
     @property
     def allowed_host_list(self) -> list[str]:
         return [host.strip().lower() for host in self.allowed_hosts.split(",") if host.strip()]
+
+    @property
+    def pii_ner_language_list(self) -> list[str]:
+        return [
+            language.strip().lower()
+            for language in self.pii_ner_languages.split(",")
+            if language.strip()
+        ]
 
     model_config = SettingsConfigDict(
         env_file=".env",

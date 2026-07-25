@@ -7,6 +7,7 @@ const state = {
   chatOpen: false,
   chatAbortController: null,
   pendingAction: null,
+  analysisPollTimer: null,
   loading: false,
   language: "en",
   translations: {},
@@ -326,6 +327,10 @@ function showAppView() {
 }
 
 function clearSessionState(message = t("auth.session_expired")) {
+  if (state.analysisPollTimer) {
+    clearTimeout(state.analysisPollTimer);
+    state.analysisPollTimer = null;
+  }
   if (state.chatAbortController) {
     state.chatAbortController.abort();
     state.chatAbortController = null;
@@ -476,10 +481,20 @@ function renderDetails() {
   }
 
   elements.selectedState.textContent = `#${documentItem.id}`;
+  const analysisProgress = documentItem.analysis_progress || {};
+  const progressText =
+    documentItem.status === "analyzing"
+      ? t("analysis.progress", {
+          completed: analysisProgress.completed_pages ?? 0,
+          total: analysisProgress.total_pages ?? "?",
+          stage: analysisProgress.stage || "queued",
+        })
+      : "";
   elements.detailsPanel.innerHTML = `
     <div class="detail-grid">
       <div class="detail-row"><span class="detail-label">${escapeHtml(t("details.filename"))}</span><span>${escapeHtml(documentItem.filename)}</span></div>
       <div class="detail-row"><span class="detail-label">${escapeHtml(t("details.status"))}</span><span><span class="badge ${escapeHtml(documentItem.status)}">${escapeHtml(statusLabel(documentItem.status))}</span></span></div>
+      ${progressText ? `<div class="detail-row"><span class="detail-label">${escapeHtml(t("analysis.title"))}</span><span>${escapeHtml(progressText)}</span></div>` : ""}
       <div class="detail-row"><span class="detail-label">${escapeHtml(t("details.type"))}</span><span>${escapeHtml(documentItem.content_type)}</span></div>
       <div class="detail-row"><span class="detail-label">${escapeHtml(t("details.size"))}</span><span>${formatBytes(documentItem.size_bytes)}</span></div>
       <div class="detail-row"><span class="detail-label">${escapeHtml(t("details.language"))}</span><span>${escapeHtml(documentLanguageLabel(documentItem))}</span></div>
@@ -701,6 +716,7 @@ async function loadData(refreshSession = true) {
       state.selectedId = null;
     }
     render();
+    scheduleAnalysisPoll();
   } catch (error) {
     if (handleApiError(error)) {
       return;
@@ -710,6 +726,20 @@ async function loadData(refreshSession = true) {
   } finally {
     setLoading(false);
   }
+}
+
+function scheduleAnalysisPoll() {
+  if (state.analysisPollTimer) {
+    clearTimeout(state.analysisPollTimer);
+    state.analysisPollTimer = null;
+  }
+  if (!state.documents.some((item) => item.status === "analyzing")) {
+    return;
+  }
+  state.analysisPollTimer = setTimeout(async () => {
+    state.analysisPollTimer = null;
+    await loadData(false);
+  }, 1500);
 }
 
 async function uploadSelectedFile(file) {
@@ -748,7 +778,7 @@ async function analyzeDocument(documentId) {
   try {
     const updated = await fetchJson(`/api/documents/${documentId}/analyze`, { method: "POST" });
     state.selectedId = updated.id;
-    showToast(updated.status === "failed" ? t("analysis.failed") : t("analysis.completed"), updated.status === "failed" ? "error" : "success");
+    showToast(t("analysis.queued"), "success");
     await loadData();
   } catch (error) {
     if (handleApiError(error)) {
@@ -800,10 +830,15 @@ async function reviewDocumentContent(documentId) {
 }
 
 async function reviewDocumentLayout(documentId) {
+  if (!confirm(t("layout_review.consent_confirm"))) {
+    return;
+  }
   setPendingAction("layout-review", documentId);
   try {
     const updated = await fetchJson(`/api/documents/${documentId}/layout-review`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ consent_to_external_image_processing: true }),
     });
     state.selectedId = updated.id;
     showToast(t("layout_review.completed"), "success");

@@ -85,6 +85,7 @@
                 <select class="select" id="statusFilter" aria-label="Filter by status" data-i18n-aria-label="documents.status_filter_label">
                   <option value="all" data-i18n="status.all">All statuses</option>
                   <option value="uploaded" data-i18n="status.uploaded">Uploaded</option>
+                  <option value="analyzing" data-i18n="status.analyzing">Analyzing</option>
                   <option value="processed" data-i18n="status.processed">Processed</option>
                   <option value="failed" data-i18n="status.failed">Failed</option>
                 </select>
@@ -127,7 +128,7 @@
             </div>
             <div class="panel-body">
               <div class="notice" data-i18n="summary.notice">
-                The summary uses extracted text only. Content quality and visual layout are reviewed separately below.
+                Detected personal data is pseudonymized locally before extracted text is sent to the AI provider. Content quality and visual layout are reviewed separately below.
               </div>
               <div class="preview" id="summaryPreview" data-i18n="summary.analyze_first_help">Analyze a document before generating an AI summary.</div>
             </div>
@@ -140,7 +141,7 @@
             </div>
             <div class="panel-body">
               <div class="notice" data-i18n="content_review.notice">
-                Uses extracted text to check spelling, punctuation, grammar, official style, logic and internal factual consistency. Possible OCR artifacts are reported separately; external facts and plagiarism are not checked.
+                Detected personal data is pseudonymized locally before extracted text is sent to the AI provider. The review checks language, style, logic and internal consistency; possible OCR artifacts are separate, and external facts or plagiarism are not checked.
               </div>
               <div class="review-controls">
                 <select class="select" id="contentReviewMode" aria-label="Content review depth" data-i18n-aria-label="content_review.depth_label">
@@ -221,6 +222,7 @@
         <button class="button small icon-btn" type="button" id="aiChatClose" aria-label="Close AI chat" data-i18n-aria-label="chat.close">×</button>
       </div>
       <div class="ai-chat-body">
+        <div class="notice" data-i18n="chat.privacy_notice">Detected personal data in document context, your question and chat history is pseudonymized locally before the AI request.</div>
         <select class="select" id="aiChatDocumentSelect" aria-label="Choose document for AI chat" data-i18n-aria-label="chat.document_select"></select>
         <div class="ai-chat-messages" id="aiChatMessages"></div>
         <form class="ai-chat-form" id="aiChatForm">
@@ -233,6 +235,6 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <script src="/web/app.js?v=20260718-auth-b"></script>
+    <script src="/web/app.js?v=20260724-adaptive-ocr"></script>
   </body>
 </html>

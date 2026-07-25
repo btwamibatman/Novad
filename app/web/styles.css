@@ -523,6 +523,12 @@ tr[data-selected="true"] {
   color: var(--text);
 }
 
+.badge.analyzing {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
 #contentReviewPreview {
   white-space: normal;
 }

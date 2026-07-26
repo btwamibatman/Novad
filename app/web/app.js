@@ -5,6 +5,8 @@ const state = {
   selectedId: null,
   chatDocumentId: null,
   chatOpen: false,
+  chatMaximized: false,
+  chatPosition: null,
   chatAbortController: null,
   pendingAction: null,
   analysisPollTimer: null,
@@ -56,6 +58,9 @@ const elements = {
   toastStack: document.querySelector("#toastStack"),
   aiChatToggle: document.querySelector("#aiChatToggle"),
   aiChatPopup: document.querySelector("#aiChatPopup"),
+  aiChatDragHandle: document.querySelector("#aiChatDragHandle"),
+  aiChatMaximize: document.querySelector("#aiChatMaximize"),
+  aiChatMaximizeIcon: document.querySelector("#aiChatMaximizeIcon"),
   aiChatClose: document.querySelector("#aiChatClose"),
   aiChatState: document.querySelector("#aiChatState"),
   aiChatDocumentSelect: document.querySelector("#aiChatDocumentSelect"),
@@ -220,6 +225,60 @@ function setTheme(theme) {
   elements.themeIcon.textContent = theme === "dark" ? t("theme.sun") : t("theme.moon");
 }
 
+let chatDrag = null;
+
+function applyChatWindowState() {
+  const maximized = state.chatMaximized;
+  const positioned = Boolean(state.chatPosition) && !maximized;
+  elements.aiChatPopup.classList.toggle("maximized", maximized);
+  elements.aiChatPopup.classList.toggle("positioned", positioned);
+  if (positioned) {
+    elements.aiChatPopup.style.left = `${state.chatPosition.left}px`;
+    elements.aiChatPopup.style.top = `${state.chatPosition.top}px`;
+  } else {
+    elements.aiChatPopup.style.removeProperty("left");
+    elements.aiChatPopup.style.removeProperty("top");
+  }
+  const label = t(maximized ? "chat.restore" : "chat.maximize");
+  elements.aiChatMaximize.setAttribute("aria-label", label);
+  elements.aiChatMaximize.title = label;
+  elements.aiChatMaximizeIcon.textContent = maximized ? "❐" : "⛶";
+}
+
+function moveChatWindow(left, top) {
+  const rect = elements.aiChatPopup.getBoundingClientRect();
+  const margin = 8;
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  state.chatPosition = {
+    left: Math.min(Math.max(margin, left), maxLeft),
+    top: Math.min(Math.max(margin, top), maxTop),
+  };
+  elements.aiChatPopup.classList.add("positioned");
+  elements.aiChatPopup.style.left = `${state.chatPosition.left}px`;
+  elements.aiChatPopup.style.top = `${state.chatPosition.top}px`;
+}
+
+function stopChatDrag(event = null) {
+  if (!chatDrag || (event && event.pointerId !== chatDrag.pointerId)) {
+    return;
+  }
+  if (elements.aiChatDragHandle.hasPointerCapture(chatDrag.pointerId)) {
+    elements.aiChatDragHandle.releasePointerCapture(chatDrag.pointerId);
+  }
+  chatDrag = null;
+  document.body.classList.remove("ai-chat-dragging");
+}
+
+function toggleChatMaximized() {
+  stopChatDrag();
+  state.chatMaximized = !state.chatMaximized;
+  applyChatWindowState();
+  if (!state.chatMaximized && state.chatPosition) {
+    moveChatWindow(state.chatPosition.left, state.chatPosition.top);
+  }
+}
+
 class ApiError extends Error {
   constructor(message, status, payload, retryAfter) {
     super(message);
@@ -347,6 +406,9 @@ function clearSessionState(message = t("auth.session_expired")) {
   state.selectedId = null;
   state.chatDocumentId = null;
   state.chatOpen = false;
+  state.chatMaximized = false;
+  state.chatPosition = null;
+  stopChatDrag();
   render();
   showLoginView(message);
 }
@@ -627,6 +689,7 @@ function syncChatDocumentSelection() {
 
 function renderChat() {
   elements.aiChatPopup.hidden = !state.chatOpen;
+  applyChatWindowState();
   syncChatDocumentSelection();
 
   const processed = processedDocuments();
@@ -1018,6 +1081,48 @@ elements.aiChatToggle.addEventListener("click", () => {
 elements.aiChatClose.addEventListener("click", () => {
   state.chatOpen = false;
   renderChat();
+});
+
+elements.aiChatMaximize.addEventListener("click", toggleChatMaximized);
+
+elements.aiChatDragHandle.addEventListener("pointerdown", (event) => {
+  if (
+    state.chatMaximized ||
+    event.button !== 0 ||
+    event.target.closest("button, input, select, textarea, a")
+  ) {
+    return;
+  }
+  const rect = elements.aiChatPopup.getBoundingClientRect();
+  chatDrag = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+  };
+  moveChatWindow(rect.left, rect.top);
+  elements.aiChatDragHandle.setPointerCapture(event.pointerId);
+  document.body.classList.add("ai-chat-dragging");
+  event.preventDefault();
+});
+
+elements.aiChatDragHandle.addEventListener("pointermove", (event) => {
+  if (!chatDrag || event.pointerId !== chatDrag.pointerId) {
+    return;
+  }
+  moveChatWindow(
+    event.clientX - chatDrag.offsetX,
+    event.clientY - chatDrag.offsetY,
+  );
+});
+
+elements.aiChatDragHandle.addEventListener("pointerup", stopChatDrag);
+elements.aiChatDragHandle.addEventListener("pointercancel", stopChatDrag);
+window.addEventListener("blur", () => stopChatDrag());
+
+window.addEventListener("resize", () => {
+  if (!state.chatMaximized && state.chatPosition) {
+    moveChatWindow(state.chatPosition.left, state.chatPosition.top);
+  }
 });
 
 elements.aiChatDocumentSelect.addEventListener("change", () => {

@@ -27,6 +27,9 @@ def test_web_interface_returns_html(client):
     assert "loginForm" in response.text
     assert "logoutButton" in response.text
     assert "aiChatToggle" in response.text
+    assert "aiChatDragHandle" in response.text
+    assert "aiChatMaximize" in response.text
+    assert "chat.privacy_notice" not in response.text
     assert "contentReviewButton" in response.text
     assert "layoutReviewButton" in response.text
     assert "PDF only" in response.text

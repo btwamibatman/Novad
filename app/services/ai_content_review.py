@@ -11,8 +11,10 @@ from app.services.ai_provider import (
     DocumentAIProvider,
     get_ai_provider,
 )
+from app.services.document_chunks import CHUNK_OVERLAP_CHARS
 
 ReviewMode = Literal["quick", "thorough"]
+MIN_CHUNK_OVERLAP_CHARS = 20
 
 
 class ReviewChunk(Protocol):
@@ -69,7 +71,7 @@ def review_document_content(
     chunks: Sequence[ReviewChunk],
     mode: ReviewMode,
 ) -> ContentReviewResult:
-    clean_chunks = [chunk for chunk in chunks if chunk.text.strip()]
+    clean_chunks = _prepare_review_chunks(chunks)
     if not clean_chunks:
         raise ContentReviewError("Document text is empty")
 
@@ -203,6 +205,60 @@ def _format_chunk(chunk: ReviewChunk) -> str:
     )
 
 
+def _prepare_review_chunks(
+    chunks: Sequence[ReviewChunk],
+) -> list[ReviewChunkData]:
+    prepared: list[ReviewChunkData] = []
+    previous_chunk: ReviewChunk | None = None
+    previous_text = ""
+
+    for chunk in chunks:
+        text = chunk.text.strip()
+        if not text:
+            continue
+
+        if (
+            previous_chunk is not None
+            and chunk.chunk_index == previous_chunk.chunk_index + 1
+            and chunk.page_number == previous_chunk.page_number
+        ):
+            overlap_size = _exact_chunk_overlap(previous_text, text)
+            if overlap_size >= MIN_CHUNK_OVERLAP_CHARS:
+                text = text[overlap_size:].lstrip()
+
+        if text:
+            prepared.append(
+                ReviewChunkData(
+                    chunk_index=chunk.chunk_index,
+                    page_number=chunk.page_number,
+                    text=text,
+                    extraction_method=getattr(
+                        chunk, "extraction_method", "unknown"
+                    ),
+                    extraction_quality=getattr(
+                        chunk, "extraction_quality", "unknown"
+                    ),
+                    confidence=getattr(chunk, "confidence", None),
+                    uncertain_region_count=getattr(
+                        chunk, "uncertain_region_count", 0
+                    ),
+                )
+            )
+
+        previous_chunk = chunk
+        previous_text = chunk.text.strip()
+
+    return prepared
+
+
+def _exact_chunk_overlap(previous: str, current: str) -> int:
+    max_overlap = min(len(previous), len(current), CHUNK_OVERLAP_CHARS)
+    for size in range(max_overlap, MIN_CHUNK_OVERLAP_CHARS - 1, -1):
+        if previous.endswith(current[:size]):
+            return size
+    return 0
+
+
 def _representative_contexts(contexts: list[str], max_chars: int) -> list[str]:
     if not contexts or max_chars <= 0:
         return []
@@ -232,10 +288,7 @@ def _build_batches(contexts: list[str], max_chars: int) -> list[str]:
     current: list[str] = []
     current_size = 0
     for context in contexts:
-        pieces = [
-            context[index : index + max_chars]
-            for index in range(0, len(context), max_chars)
-        ]
+        pieces = _split_context(context, max_chars)
         for piece in pieces:
             separator_size = 2 if current else 0
             if current and current_size + separator_size + len(piece) > max_chars:
@@ -248,6 +301,66 @@ def _build_batches(contexts: list[str], max_chars: int) -> list[str]:
     if current:
         batches.append("\n\n".join(current))
     return batches
+
+
+def _split_context(context: str, max_chars: int) -> list[str]:
+    if len(context) <= max_chars:
+        return [context]
+
+    header, separator, text = context.partition("\n")
+    if not separator:
+        return _split_text_at_boundaries(context, max_chars)
+
+    compact_header = _compact_continuation_header(header)
+    if len(compact_header) + 1 >= max_chars:
+        chunk_label = header.split(";", 1)[0].rstrip("]")
+        compact_header = f"{chunk_label}]"
+    if len(compact_header) + 1 >= max_chars:
+        raise ContentReviewError(
+            "CONTENT_REVIEW_BATCH_MAX_CHARS is too small for chunk metadata"
+        )
+    first_header = header if len(header) + 1 < max_chars else compact_header
+
+    pieces: list[str] = []
+    remaining = text
+    active_header = first_header
+    while remaining:
+        available_chars = max_chars - len(active_header) - 1
+        text_piece, remaining = _take_text_piece(remaining, available_chars)
+        pieces.append(f"{active_header}\n{text_piece}")
+        active_header = compact_header
+    return pieces
+
+
+def _compact_continuation_header(header: str) -> str:
+    fields = header.removeprefix("[").removesuffix("]").split("; ")
+    identifying_fields = fields[:4]
+    return f"[{'; '.join(identifying_fields)}; continued]"
+
+
+def _split_text_at_boundaries(text: str, max_chars: int) -> list[str]:
+    pieces: list[str] = []
+    remaining = text
+    while remaining:
+        piece, remaining = _take_text_piece(remaining, max_chars)
+        pieces.append(piece)
+    return pieces
+
+
+def _take_text_piece(text: str, max_chars: int) -> tuple[str, str]:
+    if len(text) <= max_chars:
+        return text, ""
+
+    min_boundary = max(max_chars // 2, 1)
+    newline_boundary = text.rfind("\n", min_boundary, max_chars + 1)
+    space_boundary = text.rfind(" ", min_boundary, max_chars + 1)
+    boundary = max(newline_boundary, space_boundary)
+    if boundary < min_boundary:
+        boundary = max_chars
+
+    piece = text[:boundary].rstrip()
+    remaining = text[boundary:].lstrip()
+    return piece, remaining
 
 
 def _review_rules() -> str:

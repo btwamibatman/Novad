@@ -69,3 +69,51 @@ def test_thorough_review_rejects_document_above_synchronous_limit(monkeypatch):
         ai_content_review.review_document_content(chunks, "thorough")
 
     assert provider.prompts == []
+
+
+def test_review_removes_storage_overlap_from_consecutive_page_chunks(monkeypatch):
+    provider = FakeProvider()
+    monkeypatch.setattr(ai_content_review, "get_ai_provider", lambda: provider)
+    monkeypatch.setattr(
+        ai_content_review.settings,
+        "content_review_quick_max_chars",
+        1000,
+    )
+    overlap = "shared boundary text long enough"
+    chunks = [
+        ReviewChunkData(0, 1, f"first section {overlap}", "pypdf"),
+        ReviewChunkData(1, 1, f"{overlap} second section", "pypdf"),
+    ]
+
+    result = ai_content_review.review_document_content(chunks, "quick")
+
+    assert provider.prompts[0].count(overlap) == 1
+    assert result.total_chars == len(f"first section {overlap}") + len(
+        "second section"
+    )
+
+
+def test_thorough_review_preserves_chunk_attribution_when_splitting(monkeypatch):
+    provider = FakeProvider()
+    monkeypatch.setattr(ai_content_review, "get_ai_provider", lambda: provider)
+    monkeypatch.setattr(
+        ai_content_review.settings,
+        "content_review_batch_max_chars",
+        140,
+    )
+    monkeypatch.setattr(
+        ai_content_review.settings,
+        "content_review_thorough_max_batches",
+        20,
+    )
+    chunks = [
+        ReviewChunkData(7, 3, "readable words " * 30, "ocr", "low", 61.0, 2)
+    ]
+
+    result = ai_content_review.review_document_content(chunks, "thorough")
+
+    batch_prompts = provider.prompts[:-1]
+    assert result.batch_count == len(batch_prompts)
+    assert result.batch_count > 1
+    assert all("[chunk=7" in prompt for prompt in batch_prompts)
+    assert all("readable" in prompt and "words" in prompt for prompt in batch_prompts)

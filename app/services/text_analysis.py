@@ -19,6 +19,40 @@ from app.services.file_storage import resolve_stored_path
 WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 LETTER_TOKEN_PATTERN = re.compile(r"[^\W\d_]+", re.UNICODE)
 MAX_CELL_RETRIES = 20
+MAX_TARGETED_RETRIES = 12
+ORGANIZATION_MARKERS = {"ао", "ao", "ип", "jsc", "llp", "тоо", "too"}
+PROTECTED_LATIN_TERMS = {
+    "API",
+    "HTTP",
+    "HTTPS",
+    "JSON",
+    "OCR",
+    "PDF",
+    "REST",
+    "SQL",
+    "UI",
+    "URL",
+    "UUID",
+    "XML",
+}
+CYRILLIC_LATIN_CONFUSABLES = str.maketrans(
+    {
+        "А": "A",
+        "В": "B",
+        "С": "C",
+        "Е": "E",
+        "Н": "H",
+        "І": "I",
+        "К": "K",
+        "М": "M",
+        "О": "O",
+        "Р": "P",
+        "Т": "T",
+        "Х": "X",
+        "У": "Y",
+    }
+)
+NUMERIC_FIELD_LABELS = {"балл", "оценка", "score"}
 
 ProgressCallback = Callable[[int, int, str], None]
 
@@ -312,6 +346,14 @@ def _ocr_page(page, page_number: int) -> ExtractedPage:
         if alternate.score > primary.score:
             selected = alternate
 
+    selected, latin_retry_count, latin_recovery_count = _recover_latin_spans(
+        selected,
+        image,
+    )
+    selected, numeric_retry_count, numeric_recovery_count = _recover_numeric_fields(
+        selected,
+        image,
+    )
     tables = _detect_tables(primary_image)
     _assign_words_to_tables(tables, selected.words)
     cell_retry_count = _recover_uncertain_cells(
@@ -329,7 +371,11 @@ def _ocr_page(page, page_number: int) -> ExtractedPage:
         for word in selected.words
     )
     uncertain_count = (
-        low_word_count + uncertain_cells + ambiguous_tables + int(disagreement)
+        low_word_count
+        + numeric_recovery_count
+        + uncertain_cells
+        + ambiguous_tables
+        + int(disagreement)
     )
     quality = (
         "low"
@@ -362,6 +408,10 @@ def _ocr_page(page, page_number: int) -> ExtractedPage:
             "ocr_score": round(selected.score, 2),
             "primary_ocr_score": round(primary.score, 2),
             "low_confidence_word_ratio": round(selected.low_confidence_ratio, 4),
+            "latin_retry_count": latin_retry_count,
+            "latin_recovery_count": latin_recovery_count,
+            "numeric_retry_count": numeric_retry_count,
+            "numeric_recovery_count": numeric_recovery_count,
             "cell_retry_count": cell_retry_count,
             "uncertain_cell_count": uncertain_cells,
             "ambiguous_table_count": ambiguous_tables,
@@ -540,13 +590,23 @@ def _preprocess_alternate(image):
     )
 
 
-def _run_tesseract(image, preprocessing: str, *, psm: int = 3) -> OCRCandidate:
+def _run_tesseract(
+    image,
+    preprocessing: str,
+    *,
+    psm: int = 3,
+    languages: str | None = None,
+    extra_config: str = "",
+) -> OCRCandidate:
     pytesseract = _pytesseract()
+    config = f"--oem 1 --psm {psm} -c preserve_interword_spaces=1"
+    if extra_config:
+        config = f"{config} {extra_config}"
     try:
         data = pytesseract.image_to_data(
             image,
-            lang=settings.ocr_languages,
-            config=f"--oem 1 --psm {psm} -c preserve_interword_spaces=1",
+            lang=languages or settings.ocr_languages,
+            config=config,
             output_type=pytesseract.Output.DICT,
             timeout=settings.ocr_page_timeout_seconds,
         )
@@ -604,6 +664,295 @@ def _run_tesseract(image, preprocessing: str, *, psm: int = 3) -> OCRCandidate:
         words=tuple(words),
         mean_confidence=mean_confidence,
         low_confidence_ratio=low_ratio,
+        preprocessing=preprocessing,
+    )
+
+
+def _recover_latin_spans(
+    candidate: OCRCandidate,
+    image,
+) -> tuple[OCRCandidate, int, int]:
+    if "eng" not in configured_ocr_languages():
+        return candidate, 0, 0
+
+    words = list(candidate.words)
+    spans = _latin_retry_spans(words)
+    replacements: dict[int, OCRWord] = {}
+    removed_indices: set[int] = set()
+    retries = 0
+    recoveries = 0
+
+    for indices, reason in spans[:MAX_TARGETED_RETRIES]:
+        retry = _retry_word_span(
+            words,
+            indices,
+            image,
+            languages="eng",
+            psm=8 if reason == "organization" else 7,
+        )
+        retries += 1
+        core = _single_latin_core(retry.text)
+        if core is None or not _accept_latin_retry(words, indices, retry, core, reason):
+            continue
+        replacements[indices[0]] = _replacement_word(
+            words,
+            indices,
+            _preserve_outer_punctuation(words, indices, core),
+            retry.mean_confidence,
+        )
+        removed_indices.update(indices[1:])
+        recoveries += 1
+
+    if not recoveries:
+        return candidate, retries, 0
+    recovered_words = [
+        replacements.get(index, word)
+        for index, word in enumerate(words)
+        if index not in removed_indices
+    ]
+    return _candidate_from_words(recovered_words, candidate.preprocessing), retries, recoveries
+
+
+def _latin_retry_spans(
+    words: list[OCRWord],
+) -> list[tuple[tuple[int, ...], str]]:
+    lines: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+    for index, word in enumerate(words):
+        lines[(word.block, word.paragraph, word.line)].append(index)
+
+    spans: list[tuple[tuple[int, ...], str]] = []
+    covered: set[int] = set()
+    for line_indices in lines.values():
+        ordered = sorted(line_indices, key=lambda index: words[index].left)
+        for position, index in enumerate(ordered[:-1]):
+            marker = _letters_only(words[index].text).casefold()
+            if marker not in ORGANIZATION_MARKERS:
+                continue
+            quoted_indices: list[int] = []
+            for following_index in ordered[position + 1 : position + 5]:
+                text = words[following_index].text
+                if not quoted_indices and not text.startswith(("«", '"', "“", "„")):
+                    break
+                quoted_indices.append(following_index)
+                if text.endswith(("»", '"', "”")):
+                    break
+            if quoted_indices and words[quoted_indices[-1]].text.endswith(
+                ("»", '"', "”")
+            ):
+                span = tuple(quoted_indices)
+                spans.append((span, "organization"))
+                covered.update(span)
+
+    for index, word in enumerate(words):
+        if index in covered:
+            continue
+        letters = _letters_only(word.text)
+        scripts = _token_scripts(letters)
+        if len(scripts) > 1:
+            spans.append(((index,), "mixed_script"))
+            continue
+        skeleton = letters.upper().translate(CYRILLIC_LATIN_CONFUSABLES)
+        if (
+            scripts == {"cyrillic"}
+            and skeleton in PROTECTED_LATIN_TERMS
+            and skeleton != letters.upper()
+        ):
+            spans.append(((index,), "protected_term"))
+            continue
+        if "?" in word.text and letters:
+            spans.append(((index,), "placeholder"))
+    return spans
+
+
+def _recover_numeric_fields(
+    candidate: OCRCandidate,
+    image,
+) -> tuple[OCRCandidate, int, int]:
+    words = list(candidate.words)
+    lines: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+    for index, word in enumerate(words):
+        lines[(word.block, word.paragraph, word.line)].append(index)
+
+    replacements: dict[int, OCRWord] = {}
+    retries = 0
+    recoveries = 0
+    for line_indices in lines.values():
+        ordered = sorted(line_indices, key=lambda index: words[index].left)
+        for position, index in enumerate(ordered[:-1]):
+            label = _letters_only(words[index].text).casefold()
+            if label not in NUMERIC_FIELD_LABELS:
+                continue
+            value_index = ordered[position + 1]
+            original = words[value_index]
+            if original.confidence >= settings.ocr_high_confidence:
+                continue
+            retry = _retry_word_span(
+                words,
+                (value_index,),
+                image,
+                languages="rus+eng",
+                psm=8,
+                margin=6,
+                extra_config="-c tessedit_char_whitelist=0123456789.,/-",
+            )
+            retries += 1
+            numeric_text = retry.text.strip()
+            if (
+                re.fullmatch(r"\d[\d.,/-]*", numeric_text)
+                and retry.mean_confidence >= settings.ocr_low_word_confidence
+                and retry.mean_confidence >= original.confidence + 10
+            ):
+                replacements[value_index] = _replacement_word(
+                    words,
+                    (value_index,),
+                    numeric_text,
+                    retry.mean_confidence,
+                )
+                recoveries += 1
+            break
+        if retries >= MAX_TARGETED_RETRIES:
+            break
+
+    if not recoveries:
+        return candidate, retries, 0
+    recovered_words = [
+        replacements.get(index, word) for index, word in enumerate(words)
+    ]
+    return _candidate_from_words(recovered_words, candidate.preprocessing), retries, recoveries
+
+
+def _retry_word_span(
+    words: list[OCRWord],
+    indices: tuple[int, ...],
+    image,
+    *,
+    languages: str,
+    psm: int,
+    margin: int = 12,
+    extra_config: str = "",
+) -> OCRCandidate:
+    left = max(min(words[index].left for index in indices) - margin, 0)
+    top = max(min(words[index].top for index in indices) - margin, 0)
+    right = min(
+        max(words[index].left + words[index].width for index in indices) + margin,
+        image.shape[1],
+    )
+    bottom = min(
+        max(words[index].top + words[index].height for index in indices) + margin,
+        image.shape[0],
+    )
+    crop = image[top:bottom, left:right]
+    return _run_tesseract(
+        crop,
+        "targeted_retry",
+        psm=psm,
+        languages=languages,
+        extra_config=extra_config,
+    )
+
+
+def _accept_latin_retry(
+    words: list[OCRWord],
+    indices: tuple[int, ...],
+    retry: OCRCandidate,
+    core: str,
+    reason: str,
+) -> bool:
+    if retry.mean_confidence < 80:
+        return False
+    original_confidence = sum(words[index].confidence for index in indices) / len(
+        indices
+    )
+    original_text = " ".join(words[index].text for index in indices)
+    if reason == "protected_term":
+        return core.upper() in PROTECTED_LATIN_TERMS
+    if reason == "mixed_script":
+        return retry.mean_confidence >= original_confidence
+    if reason == "placeholder":
+        return retry.mean_confidence >= original_confidence - 5
+    return (
+        reason == "organization"
+        and (
+            "?" in original_text
+            or (
+                original_confidence < settings.ocr_high_confidence
+                and retry.mean_confidence >= original_confidence + 5
+            )
+        )
+    )
+
+
+def _single_latin_core(text: str) -> str | None:
+    matches = re.findall(r"[A-Za-z][A-Za-z0-9._&/-]*", text)
+    return matches[0] if len(matches) == 1 and len(matches[0]) >= 2 else None
+
+
+def _letters_only(text: str) -> str:
+    return "".join(character for character in text if character.isalpha())
+
+
+def _preserve_outer_punctuation(
+    words: list[OCRWord],
+    indices: tuple[int, ...],
+    core: str,
+) -> str:
+    original = " ".join(words[index].text for index in indices)
+    prefix_match = re.match(r"^[^A-Za-zА-Яа-яӘәҒғҚқҢңӨөҰұҮүҺһІі]*", original)
+    suffix_match = re.search(r"[^A-Za-zА-Яа-яӘәҒғҚқҢңӨөҰұҮүҺһІі]*$", original)
+    prefix = prefix_match.group(0) if prefix_match else ""
+    suffix = suffix_match.group(0) if suffix_match else ""
+    return f"{prefix}{core}{suffix}"
+
+
+def _replacement_word(
+    words: list[OCRWord],
+    indices: tuple[int, ...],
+    text: str,
+    confidence: float,
+) -> OCRWord:
+    first = words[indices[0]]
+    left = min(words[index].left for index in indices)
+    top = min(words[index].top for index in indices)
+    right = max(words[index].left + words[index].width for index in indices)
+    bottom = max(words[index].top + words[index].height for index in indices)
+    return OCRWord(
+        text=text,
+        confidence=confidence,
+        left=left,
+        top=top,
+        width=right - left,
+        height=bottom - top,
+        block=first.block,
+        paragraph=first.paragraph,
+        line=first.line,
+    )
+
+
+def _candidate_from_words(
+    words: list[OCRWord],
+    preprocessing: str,
+) -> OCRCandidate:
+    if words:
+        weighted_total = sum(
+            word.confidence * max(len(word.text), 1) for word in words
+        )
+        total_weight = sum(max(len(word.text), 1) for word in words)
+        mean_confidence = weighted_total / total_weight
+        low_confidence_ratio = (
+            sum(
+                word.confidence < settings.ocr_low_word_confidence
+                for word in words
+            )
+            / len(words)
+        )
+    else:
+        mean_confidence = 0.0
+        low_confidence_ratio = 1.0
+    return OCRCandidate(
+        text=_words_to_text(words),
+        words=tuple(words),
+        mean_confidence=mean_confidence,
+        low_confidence_ratio=low_confidence_ratio,
         preprocessing=preprocessing,
     )
 

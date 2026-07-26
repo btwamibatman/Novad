@@ -175,3 +175,113 @@ def test_run_tesseract_uses_configured_languages_and_returns_confidence(
     assert captured["lang"] == "rus+kaz+eng"
     assert candidate.text == "Readable text"
     assert candidate.mean_confidence > 87
+
+
+def test_targeted_retry_recovers_quoted_latin_name_and_protected_term(
+    monkeypatch,
+):
+    words = (
+        _word("ТОО", 96, 0, 10),
+        _word("«Ка", 78, 60, 10),
+        _word("ТАУ»", 74, 115, 10),
+        _word("АРІ", 92, 200, 10),
+    )
+    candidate = OCRCandidate(
+        text="ТОО «Ка ТАУ» АРІ",
+        words=words,
+        mean_confidence=85,
+        low_confidence_ratio=0,
+        preprocessing="contrast",
+    )
+    retries = iter(
+        (
+            OCRCandidate("«KazUAV»", (), 88, 0, "targeted_retry"),
+            OCRCandidate("API", (), 96, 0, "targeted_retry"),
+        )
+    )
+    monkeypatch.setattr(
+        text_analysis,
+        "_run_tesseract",
+        lambda *args, **kwargs: next(retries),
+    )
+
+    recovered, retry_count, recovery_count = text_analysis._recover_latin_spans(
+        candidate,
+        numpy.full((100, 300), 255, dtype=numpy.uint8),
+    )
+
+    assert recovered.text == "ТОО «KazUAV» API"
+    assert retry_count == 2
+    assert recovery_count == 2
+
+
+def test_targeted_retry_preserves_confident_cyrillic_company_name(monkeypatch):
+    words = (
+        _word("ТОО", 96, 0, 10),
+        _word("«САПА»", 96, 60, 10),
+    )
+    candidate = OCRCandidate(
+        text="ТОО «САПА»",
+        words=words,
+        mean_confidence=96,
+        low_confidence_ratio=0,
+        preprocessing="contrast",
+    )
+    monkeypatch.setattr(
+        text_analysis,
+        "_run_tesseract",
+        lambda *args, **kwargs: OCRCandidate(
+            "«CAPA»",
+            (),
+            99,
+            0,
+            "targeted_retry",
+        ),
+    )
+
+    recovered, retry_count, recovery_count = text_analysis._recover_latin_spans(
+        candidate,
+        numpy.full((100, 200), 255, dtype=numpy.uint8),
+    )
+
+    assert recovered.text == "ТОО «САПА»"
+    assert retry_count == 1
+    assert recovery_count == 0
+
+
+def test_numeric_retry_recovers_low_confidence_score_and_reports_recovery(
+    monkeypatch,
+):
+    words = (
+        _word("Рекомендуемая", 96, 0, 10),
+        _word("оценка", 93, 80, 10),
+        _word("д9г", 36, 150, 10),
+    )
+    candidate = OCRCandidate(
+        text="Рекомендуемая оценка д9г",
+        words=words,
+        mean_confidence=75,
+        low_confidence_ratio=1 / 3,
+        preprocessing="contrast",
+    )
+    monkeypatch.setattr(
+        text_analysis,
+        "_run_tesseract",
+        lambda *args, **kwargs: OCRCandidate(
+            "95",
+            (),
+            63,
+            0,
+            "targeted_retry",
+        ),
+    )
+
+    recovered, retry_count, recovery_count = text_analysis._recover_numeric_fields(
+        candidate,
+        numpy.full((100, 250), 255, dtype=numpy.uint8),
+    )
+
+    assert recovered.text == "Рекомендуемая оценка 95"
+    assert retry_count == 1
+    assert recovery_count == 1
+    assert recovered.words[-1].confidence == 63

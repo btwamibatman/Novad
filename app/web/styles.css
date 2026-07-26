@@ -23,25 +23,25 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f5f7fb;
+  --bg: #e9eef5;
   --surface: #ffffff;
-  --surface-2: #f0f3f8;
-  --surface-hover: #e9eef6;
-  --border: #d8dee8;
-  --border-soft: #e7ebf2;
+  --surface-2: #f2f5f9;
+  --surface-hover: #e2e8f1;
+  --border: #c5cfdd;
+  --border-soft: #d8e0ea;
   --text: #111827;
-  --text-soft: #5d6677;
-  --muted: #8a94a6;
+  --text-soft: #4f5b6d;
+  --muted: #768297;
   --accent: #2563eb;
   --accent-2: #1d4ed8;
-  --accent-soft: rgba(37, 99, 235, 0.12);
+  --accent-soft: rgba(37, 99, 235, 0.15);
   --success: #16833a;
-  --success-soft: rgba(22, 131, 58, 0.1);
+  --success-soft: rgba(22, 131, 58, 0.12);
   --warning: #a16207;
-  --warning-soft: rgba(161, 98, 7, 0.1);
+  --warning-soft: rgba(161, 98, 7, 0.12);
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.1);
-  --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  --shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
 }
 
 * {

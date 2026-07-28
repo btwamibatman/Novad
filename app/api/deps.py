@@ -38,7 +38,6 @@ def get_current_session(
     db: Session = Depends(get_db),
 ) -> UserSession:
     response.headers["Cache-Control"] = "no-store"
-    session_crud.cleanup_expired_sessions(db)
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
         raise HTTPException(

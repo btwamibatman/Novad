@@ -91,6 +91,17 @@ def test_protected_api_requires_authentication(anonymous_client):
     assert response.json()["detail"] == "Authentication required"
 
 
+def test_authenticated_request_does_not_run_global_session_cleanup(client, monkeypatch):
+    def fail_if_called(_db):
+        raise AssertionError("global session cleanup must not run during authentication")
+
+    monkeypatch.setattr(session_crud, "cleanup_expired_sessions", fail_if_called)
+
+    response = client.get("/api/auth/me")
+
+    assert response.status_code == 200
+
+
 def test_login_sets_opaque_http_only_cookie(anonymous_client):
     add_user("admin", "strong password")
 

@@ -1,3 +1,14 @@
+FROM node:24-alpine AS frontend-build
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -23,6 +34,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 RUN python -c "import stanza; [stanza.download(lang, model_dir='/opt/stanza_resources', processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
 
 COPY . .
+COPY --from=frontend-build /app/web/dist /app/app/web/dist
 
 RUN adduser --disabled-password --gecos "" --no-create-home appuser
 USER appuser

@@ -4,7 +4,7 @@ from contextlib import suppress
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware import Middleware
@@ -19,7 +19,8 @@ from app.middleware.request_size import RequestSizeLimitMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
-WEB_INDEX = WEB_DIR / "index.html"
+WEB_DIST_DIR = WEB_DIR / "dist"
+WEB_INDEX = WEB_DIST_DIR / "index.html"
 
 
 async def cleanup_expired_sessions_loop() -> None:
@@ -63,11 +64,20 @@ app = FastAPI(
 )
 
 app.include_router(api_router)
-app.mount("/web", StaticFiles(directory=WEB_DIR), name="web")
+app.mount(
+    "/web/dist",
+    StaticFiles(directory=WEB_DIST_DIR, check_dir=False),
+    name="web",
+)
 
 
 @app.get("/", include_in_schema=False)
 def web_interface() -> FileResponse:
+    if not WEB_INDEX.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Frontend build is unavailable; run npm run build in frontend/",
+        )
     return FileResponse(WEB_INDEX)
 
 

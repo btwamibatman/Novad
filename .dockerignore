@@ -12,5 +12,9 @@ tests/
 docs/
 *.md
 storage/uploads/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+app/web/dist/
 .venv
 venv

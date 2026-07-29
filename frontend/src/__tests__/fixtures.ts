@@ -1,0 +1,37 @@
+import type { DocumentRead } from '@/types/document'
+
+export function makeDocument(overrides: Partial<DocumentRead> = {}): DocumentRead {
+  return {
+    id: 1,
+    user_id: 1,
+    filename: 'sample.pdf',
+    content_type: 'application/pdf',
+    size_bytes: 1024,
+    status: 'processed',
+    analysis_progress: {},
+    extracted_text: 'Extracted sample text',
+    extraction_quality: 'high',
+    extraction_quality_meta: {},
+    detected_language: 'en',
+    language_distribution: { en: 1 },
+    word_count: 3,
+    char_count: 21,
+    error_message: null,
+    ai_summary: '',
+    ai_model: null,
+    ai_error: null,
+    ai_summary_meta: {},
+    content_review: '',
+    content_review_model: null,
+    content_review_error: null,
+    content_review_mode: null,
+    content_review_meta: {},
+    layout_review: '',
+    layout_review_model: null,
+    layout_review_error: null,
+    layout_review_meta: {},
+    created_at: '2026-07-29T10:00:00Z',
+    updated_at: '2026-07-29T10:00:00Z',
+    ...overrides,
+  }
+}

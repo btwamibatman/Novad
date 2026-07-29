@@ -16,6 +16,10 @@ practice_tracker.db
 documents.db
 test.db
 storage/uploads/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+app/web/dist/
 
 .DS_Store
 Thumbs.db

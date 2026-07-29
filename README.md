@@ -35,7 +35,7 @@ The project is designed for industrial practice reporting and uses only demo/loc
 - Ephemeral visual review of selected PDF pages under general RK document rules
 - Dashboard summary endpoint
 - Username/password authentication with server-side sessions
-- Static Document Console at `/`
+- Vue 3 Document Console at `/`
 - Swagger UI at `/docs`
 - Basic pytest coverage
 
@@ -134,6 +134,31 @@ Start the analysis worker in a second terminal:
 ```bash
 python -m app.analysis_worker
 ```
+
+### Vue frontend development
+
+For frontend development with hot module replacement:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/web/dist/`. The Vite development server proxies
+`/api` requests to FastAPI on port 8000.
+
+To serve the production build directly from FastAPI:
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+uvicorn app.main:app --reload
+```
+
+The FastAPI root page at `http://localhost:8000` serves `app/web/dist/index.html`.
 
 Local OCR also requires Tesseract with the `rus`, `kaz`, `eng` and `osd`
 language packages. Docker installs these packages and downloads the local Stanza

@@ -4,11 +4,9 @@
 
 The application separates HTTP handling from CPU-intensive document analysis:
 
-```text
 Vue client -> FastAPI API -> PostgreSQL + local PDF storage
                          -> analysis_jobs table -> analysis worker -> OCR pipeline
                          -> local PII masking -> Gemini API
-```
 
 `POST /api/documents/{document_id}/analyze` creates or reuses a database job and immediately returns HTTP `202`. The worker claims pending jobs, processes PDF pages, stores progress, and persists the extracted text and quality metadata.
 

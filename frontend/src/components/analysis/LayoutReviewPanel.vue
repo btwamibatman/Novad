@@ -67,7 +67,7 @@ async function review(): Promise<void> {
       <span class="muted">{{ state }}</span>
     </div>
     <div class="panel-body">
-      <div class="notice">{{ t('layout_review.notice') }}</div>
+      <p class="section-help">{{ t('layout_review.notice') }}</p>
       <div class="review-controls">
         <button
           class="button primary"

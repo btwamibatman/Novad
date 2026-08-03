@@ -25,8 +25,9 @@ const state = computed(() => aiState(props.document))
 const aiClass = computed(() => {
   if (state.value === 'error') return 'failed'
   if (state.value === 'ready') return 'processed'
-  return 'uploaded'
+  return 'neutral'
 })
+const needsAnalysis = computed(() => ['uploaded', 'failed'].includes(props.document.status))
 
 function select(): void {
   documentsStore.selectedId = props.document.id
@@ -34,6 +35,14 @@ function select(): void {
 
 function download(): void {
   window.location.href = documentsApi.downloadUrl(props.document.id)
+}
+
+function primaryAction(): void {
+  if (needsAnalysis.value) {
+    emit('analyze', props.document.id)
+  } else {
+    select()
+  }
 }
 </script>
 
@@ -65,63 +74,45 @@ function download(): void {
     <td>
       <div class="row-actions" @click.stop>
         <button
-          class="button small"
-          type="button"
-          :disabled="documentsStore.busy"
-          @click="select"
-        >
-          {{ t('documents.open') }}
-        </button>
-        <button
-          class="button small"
+          class="button small primary"
           :class="{ loading: documentsStore.isPending('analyze', document.id) }"
           type="button"
           :disabled="documentsStore.busy"
           :aria-busy="documentsStore.isPending('analyze', document.id)"
-          @click="emit('analyze', document.id)"
+          @click="primaryAction"
         >
           {{
-            documentsStore.isPending('analyze', document.id)
+            needsAnalysis && documentsStore.isPending('analyze', document.id)
               ? t('documents.analyzing')
-              : t('documents.analyze')
+              : needsAnalysis
+                ? t('documents.analyze')
+                : t('documents.open_result')
           }}
         </button>
-        <button
-          class="button small"
-          :class="{ loading: documentsStore.isPending('summarize', document.id) }"
-          type="button"
-          :disabled="documentsStore.busy || document.status !== 'processed'"
-          :aria-busy="documentsStore.isPending('summarize', document.id)"
-          @click="emit('summarize', document.id)"
-        >
-          {{
-            documentsStore.isPending('summarize', document.id)
-              ? t('documents.summarizing')
-              : t('documents.summarize')
-          }}
-        </button>
-        <button
-          class="button small"
-          type="button"
-          :disabled="documentsStore.busy"
-          @click="download"
-        >
-          {{ t('documents.download') }}
-        </button>
-        <button
-          class="button small danger"
-          :class="{ loading: documentsStore.isPending('delete', document.id) }"
-          type="button"
-          :disabled="documentsStore.busy"
-          :aria-busy="documentsStore.isPending('delete', document.id)"
-          @click="emit('remove', document.id)"
-        >
-          {{
-            documentsStore.isPending('delete', document.id)
-              ? t('documents.deleting')
-              : t('documents.delete')
-          }}
-        </button>
+        <details class="row-menu">
+          <summary class="icon-btn small" role="button" :aria-label="t('documents.more')">⋯</summary>
+          <div class="row-menu-popover">
+            <button
+              class="menu-action"
+              type="button"
+              :disabled="documentsStore.busy || document.status !== 'processed'"
+              @click="emit('summarize', document.id)"
+            >
+              {{ t('documents.summarize') }}
+            </button>
+            <button class="menu-action" type="button" :disabled="documentsStore.busy" @click="download">
+              {{ t('documents.download') }}
+            </button>
+            <button
+              class="menu-action danger-text"
+              type="button"
+              :disabled="documentsStore.busy"
+              @click="emit('remove', document.id)"
+            >
+              {{ t('documents.delete') }}
+            </button>
+          </div>
+        </details>
       </div>
     </td>
   </tr>

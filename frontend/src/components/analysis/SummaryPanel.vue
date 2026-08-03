@@ -3,10 +3,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useDocumentsStore } from '@/stores/documents'
+import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
+import { useToasts } from '@/composables/useToasts'
 import { qualityWarning } from '@/utils/documents'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
+const { handle } = useApiErrorHandler()
+const { show } = useToasts()
 const document = computed(() => documentsStore.selectedDocument)
 const warning = computed(() =>
   qualityWarning(document.value, (key, params) => t(key, params ?? {})),
@@ -30,6 +34,19 @@ const summary = computed(() => {
         : t('summary.analyze_first_help'))
   return warning.value ? `${warning.value}\n\n${text}` : text
 })
+const pending = computed(
+  () => document.value !== null && documentsStore.isPending('summarize', document.value.id),
+)
+
+async function summarize(): Promise<void> {
+  if (!document.value) return
+  try {
+    await documentsStore.summarize(document.value.id)
+    show(t('summary.generated'), 'success')
+  } catch (error) {
+    handle(error)
+  }
+}
 </script>
 
 <template>
@@ -39,7 +56,17 @@ const summary = computed(() => {
       <span class="muted">{{ state }}</span>
     </div>
     <div class="panel-body">
-      <div class="notice">{{ t('summary.notice') }}</div>
+      <p class="section-help">{{ t('summary.notice') }}</p>
+      <button
+        v-if="!document?.ai_summary"
+        class="button primary section-action"
+        type="button"
+        :class="{ loading: pending }"
+        :disabled="documentsStore.busy || document?.status !== 'processed'"
+        @click="summarize"
+      >
+        {{ pending ? t('documents.summarizing') : t('documents.summarize') }}
+      </button>
       <div class="preview">{{ summary }}</div>
     </div>
   </article>

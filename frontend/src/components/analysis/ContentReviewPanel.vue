@@ -77,7 +77,7 @@ async function review(): Promise<void> {
       <span class="muted">{{ state }}</span>
     </div>
     <div class="panel-body">
-      <div class="notice">{{ t('content_review.notice') }}</div>
+      <p class="section-help">{{ t('content_review.notice') }}</p>
       <div class="review-controls">
         <select
           v-model="mode"
@@ -85,8 +85,8 @@ async function review(): Promise<void> {
           :aria-label="t('content_review.depth_label')"
           :disabled="documentsStore.busy"
         >
-          <option value="quick">{{ t('content_review.quick') }}</option>
-          <option value="thorough">{{ t('content_review.thorough') }}</option>
+          <option value="quick">{{ t('content_review.quick_short') }}</option>
+          <option value="thorough">{{ t('content_review.thorough_short') }}</option>
         </select>
         <button
           class="button primary"
@@ -99,6 +99,7 @@ async function review(): Promise<void> {
           {{ pending ? t('content_review.reviewing') : t('content_review.action') }}
         </button>
       </div>
+      <p class="control-help">{{ t(`content_review.${mode}_help`) }}</p>
       <MarkdownContent :content="content" />
     </div>
   </article>

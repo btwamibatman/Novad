@@ -20,6 +20,8 @@ ENV STANZA_RESOURCES_DIR=/opt/stanza_resources
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         fonts-noto \
+        ghostscript \
+        libreoffice-writer \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-kaz \

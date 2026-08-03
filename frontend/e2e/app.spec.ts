@@ -92,6 +92,10 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean) {
       })
       return
     }
+    if (path === '/api/tools/jobs') {
+      await route.fulfill({ json: [] })
+      return
+    }
     if (path === '/api/documents' && request.method() === 'GET') {
       if (state.document.status === 'analyzing') {
         state.analysisListRequests += 1
@@ -197,12 +201,15 @@ test('login, inspect a document and logout', async ({ page }) => {
   await page.getByRole('button', { name: 'Toggle theme' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
+  await page.getByRole('button', { name: 'User menu' }).click()
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible()
 })
 
 test('analysis, AI reviews and chat retain their behavior', async ({ page }) => {
-  await installMockApi(page, true)
+  const state = await installMockApi(page, true)
+  state.document.status = 'uploaded'
+  state.document.extracted_text = ''
 
   await page.goto('/web/dist/')
   await expect(page.getByText('sample.pdf').first()).toBeVisible()
@@ -216,12 +223,15 @@ test('analysis, AI reviews and chat retain their behavior', async ({ page }) => 
     page.locator('tr[data-document-id="1"] .badge.processed').first(),
   ).toBeVisible({ timeout: 5000 })
 
+  await page.getByRole('tab', { name: 'Summary' }).click()
   await page.getByRole('button', { name: 'Summarize' }).click()
   await expect(page.getByText('Generated summary')).toBeVisible()
 
+  await page.getByRole('tab', { name: 'Content' }).click()
   await page.getByRole('button', { name: 'Review content' }).click()
   await expect(page.getByText('Content review completed')).toBeVisible()
 
+  await page.getByRole('tab', { name: 'Layout' }).click()
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Review layout visually' }).click()
   await expect(page.getByText('Layout review completed', { exact: true })).toBeVisible()
@@ -248,6 +258,19 @@ test('upload and delete update the document list', async ({ page }) => {
   await expect(page.getByText('uploaded.pdf').first()).toBeVisible()
 
   page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await expect(page.getByText('No documents for this filter.')).toBeVisible()
+})
+
+test('tools page exposes local workflows with recommended compression by default', async ({ page }) => {
+  await installMockApi(page, true)
+
+  await page.goto('/web/dist/')
+  await page.getByRole('link', { name: 'Tools' }).click()
+  await expect(page.getByRole('heading', { name: 'Document tools' })).toBeVisible()
+
+  await page.getByRole('button', { name: /Compress PDF/ }).click()
+  await expect(page.getByLabel(/Recommended · Balanced/)).toBeChecked()
+  await expect(page.getByText('Usually 30–60%')).toBeVisible()
 })

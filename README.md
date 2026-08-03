@@ -13,6 +13,9 @@ A full-stack application for uploading PDF documents, extracting native or OCR t
 - Language detection, text metrics, chunking, and extraction-quality checks
 - Gemini summaries, content review, document Q&A, and visual layout review
 - Local PII masking before text is sent to the AI provider
+- Local PDF compression with basic, recommended, and extreme modes
+- Local Word-to-PDF conversion and editable PDF-to-Word beta with OCR for scans
+- Confirm-before-apply PDF redaction with personal, financial, visual, and service categories
 - Vue 3 web interface and Swagger API documentation
 
 ## Quick Start with Docker
@@ -44,7 +47,7 @@ docker compose down
 
 ## Local Development
 
-Local development requires Python 3.12 and Tesseract with `rus`, `kaz`, `eng`, and `osd` language data.
+Local development requires Python 3.12, LibreOffice, Ghostscript, and Tesseract with `rus`, `kaz`, `eng`, and `osd` language data. The Docker image installs all of them.
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

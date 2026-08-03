@@ -191,3 +191,16 @@ Layout review without explicit image-processing consent returns HTTP 400. If loc
 PII NER is unavailable, text AI operations return HTTP 503 without sending raw text.
 
 FastAPI returns HTTP 422 with validation details when path parameters or request data are invalid.
+
+## Local Document Tools
+
+All tool operations are user-scoped and processed by the local worker.
+
+- `GET /api/tools/jobs` — list recent tool jobs.
+- `POST /api/tools/compress` — queue PDF compression (`low`, `recommended`, `extreme`).
+- `POST /api/tools/word-to-pdf` — upload DOCX, DOC, or ODT and queue PDF conversion.
+- `POST /api/tools/pdf-to-word` — queue editable DOCX creation with OCR fallback.
+- `POST /api/tools/redaction/preview` — detect selected data categories and create a review job.
+- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed findings as permanent redaction or pseudonymized labels.
+- `GET /api/tools/jobs/{job_id}/pages/{page_number}` — render a local review preview.
+- `GET /api/tools/jobs/{job_id}/download` — download a completed derivative without replacing the original.

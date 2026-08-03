@@ -10,13 +10,13 @@ class Settings(BaseSettings):
     allowed_hosts: str = "localhost,127.0.0.1,testserver"
     database_url: str = "sqlite:///./documents.db"
     storage_dir: str = "storage/uploads"
-    max_upload_size_bytes: int = 10 * 1024 * 1024
-    max_request_size_bytes: int = 11 * 1024 * 1024
+    max_upload_size_bytes: int = 50 * 1024 * 1024
+    max_request_size_bytes: int = 55 * 1024 * 1024
     max_pdf_pages: int = 100
     session_cookie_name: str = "document_session"
     session_ttl_minutes: int = 120
     session_cleanup_interval_seconds: int = 900
-    session_storage_quota_bytes: int = 30 * 1024 * 1024
+    session_storage_quota_bytes: int = 500 * 1024 * 1024
     ai_provider: str = "gemini"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"

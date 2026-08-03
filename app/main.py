@@ -72,6 +72,8 @@ app.mount(
 
 
 @app.get("/", include_in_schema=False)
+@app.get("/documents", include_in_schema=False)
+@app.get("/tools", include_in_schema=False)
 def web_interface() -> FileResponse:
     if not WEB_INDEX.is_file():
         raise HTTPException(

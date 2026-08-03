@@ -122,4 +122,4 @@ def resolve_stored_path(stored_path: str) -> Path:
 def remove_stored_file(stored_path: str) -> None:
     path = resolve_stored_path(stored_path)
     if path.exists() and path.is_file():
-        path.unlink()
+        path.unlink(missing_ok=True)

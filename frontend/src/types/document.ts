@@ -85,3 +85,40 @@ export interface AIChatResponse {
   privacy_applied: boolean
   masked_entity_count: number
 }
+
+export type ToolJobStatus = 'pending' | 'running' | 'review' | 'completed' | 'failed'
+export type CompressionMode = 'low' | 'recommended' | 'extreme'
+export type RedactionMode = 'black' | 'pseudonymize'
+export type RedactionCategory = 'personal' | 'financial' | 'visual' | 'service'
+
+export interface RedactionFinding {
+  id: string
+  page: number
+  group: RedactionCategory
+  category: string
+  text: string
+  confidence: number
+  pdf_rect: number[]
+  rect: { x: number; y: number; width: number; height: number }
+}
+
+export interface ToolJobRead {
+  id: number
+  source_document_id: number | null
+  kind: 'compression' | 'word_to_pdf' | 'pdf_to_word' | 'redaction'
+  status: ToolJobStatus
+  stage: string
+  progress: number
+  source_filename: string
+  source_content_type: string
+  options: Record<string, unknown>
+  findings: RedactionFinding[]
+  result_filename: string | null
+  result_content_type: string | null
+  result_size_bytes: number | null
+  result_meta: Record<string, unknown>
+  error_message: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}

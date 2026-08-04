@@ -25,8 +25,22 @@ class RedactionPreviewRequest(BaseModel):
     )
 
 
+class RedactionRect(BaseModel):
+    x: float = Field(ge=0, le=100)
+    y: float = Field(ge=0, le=100)
+    width: float = Field(gt=0, le=100)
+    height: float = Field(gt=0, le=100)
+
+
+class RedactionArea(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    page: int = Field(ge=1)
+    rect: RedactionRect
+
+
 class RedactionApplyRequest(BaseModel):
-    finding_ids: list[str]
+    finding_ids: list[str] = Field(default_factory=list)
+    areas: list[RedactionArea] = Field(default_factory=list, max_length=500)
     mode: RedactionMode = "black"
 
 
@@ -51,4 +65,3 @@ class ToolJobRead(BaseModel):
     finished_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
-

@@ -117,10 +117,16 @@ def _process_redaction(job: ToolJob, source: Path, progress) -> None:
         job.finished_at = utc_now()
         return
     destination = _result_path(job, ".pdf", suffix="-protected")
+    selected_areas = job.options.get("selected_redaction_areas", [])
+    findings = (
+        document_redaction.findings_from_areas(source, job.findings, selected_areas)
+        if selected_areas
+        else job.findings
+    )
     meta = document_redaction.apply_redactions(
         source,
         destination,
-        job.findings,
+        findings,
         set(job.options.get("selected_finding_ids", [])),
         str(job.options.get("redaction_mode", "black")),
         progress,
@@ -151,4 +157,3 @@ def _result_path(job: ToolJob, extension: str, suffix: str = "") -> Path:
         "pdf_to_word": "-editable",
     }.get(job.kind, suffix)
     return directory / f"{stem or 'document'}{label}-{job.id}{extension}"
-

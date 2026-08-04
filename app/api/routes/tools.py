@@ -153,14 +153,29 @@ async def enqueue_redaction_apply(
     job = _owned_job(db, job_id, current_session.user_id)
     if job.kind != "redaction" or job.status != "review":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Redaction preview is not ready")
-    available = {finding.get("id") for finding in job.findings}
-    selected = list(dict.fromkeys(payload.finding_ids))
-    if not selected or any(finding_id not in available for finding_id in selected):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid redaction selection")
+    selected_areas = [area.model_dump() for area in payload.areas]
+    if selected_areas:
+        page_count = int(job.result_meta.get("page_count", 0))
+        area_ids = [area["id"] for area in selected_areas]
+        invalid_area = any(
+            area["page"] > page_count
+            or area["rect"]["x"] + area["rect"]["width"] > 100.001
+            or area["rect"]["y"] + area["rect"]["height"] > 100.001
+            for area in selected_areas
+        )
+        if invalid_area or len(area_ids) != len(set(area_ids)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid redaction areas")
+        selected = area_ids
+    else:
+        available = {finding.get("id") for finding in job.findings}
+        selected = list(dict.fromkeys(payload.finding_ids))
+        if not selected or any(finding_id not in available for finding_id in selected):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid redaction selection")
     job.options = {
         **job.options,
         "operation": "apply",
         "selected_finding_ids": selected,
+        "selected_redaction_areas": selected_areas,
         "redaction_mode": payload.mode,
     }
     job.status = "pending"

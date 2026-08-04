@@ -473,6 +473,41 @@ def apply_redactions(
     }
 
 
+def findings_from_areas(source: Path, findings: list[dict], areas: list[dict]) -> list[dict]:
+    """Convert UI percentage rectangles to PDF coordinates for final redaction."""
+    existing = {finding["id"]: finding for finding in findings}
+    resolved: list[dict] = []
+    try:
+        with pymupdf.open(source) as document:
+            for area in areas:
+                page_number = int(area["page"])
+                if page_number < 1 or page_number > document.page_count:
+                    raise RedactionError("Invalid redaction page")
+                page_rect = document.load_page(page_number - 1).rect
+                ui_rect = area["rect"]
+                x0 = page_rect.x0 + page_rect.width * float(ui_rect["x"]) / 100
+                y0 = page_rect.y0 + page_rect.height * float(ui_rect["y"]) / 100
+                x1 = min(page_rect.x1, x0 + page_rect.width * float(ui_rect["width"]) / 100)
+                y1 = min(page_rect.y1, y0 + page_rect.height * float(ui_rect["height"]) / 100)
+                base = existing.get(area["id"], {})
+                finding = _finding(
+                    page_number,
+                    base.get("group", "personal"),
+                    base.get("category", "MANUAL"),
+                    base.get("text", ""),
+                    pymupdf.Rect(x0, y0, x1, y1),
+                    page_rect,
+                    float(base.get("confidence", 1)),
+                )
+                finding["id"] = area["id"]
+                resolved.append(finding)
+    except RedactionError:
+        raise
+    except Exception as error:
+        raise RedactionError("Unable to resolve redaction areas") from error
+    return resolved
+
+
 def _page_words(page) -> tuple[list[dict], str]:
     items: list[dict] = []
     parts: list[str] = []

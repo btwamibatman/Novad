@@ -24,3 +24,4 @@ app/web/dist/
 .DS_Store
 Thumbs.db
 notes.md
+/storage

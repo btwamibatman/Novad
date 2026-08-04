@@ -201,6 +201,6 @@ All tool operations are user-scoped and processed by the local worker.
 - `POST /api/tools/word-to-pdf` — upload DOCX, DOC, or ODT and queue PDF conversion.
 - `POST /api/tools/pdf-to-word` — queue editable DOCX creation with OCR fallback.
 - `POST /api/tools/redaction/preview` — detect selected data categories and create a review job.
-- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed findings as permanent redaction or pseudonymized labels.
+- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed or manually drawn percentage-based `areas` as permanent redaction or pseudonymized labels; legacy `finding_ids` are also accepted.
 - `GET /api/tools/jobs/{job_id}/pages/{page_number}` — render a local review preview.
 - `GET /api/tools/jobs/{job_id}/download` — download a completed derivative without replacing the original.

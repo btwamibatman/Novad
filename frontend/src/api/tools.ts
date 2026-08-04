@@ -1,6 +1,7 @@
 import { requestJson } from './client'
 import type {
   CompressionMode,
+  RedactionArea,
   RedactionCategory,
   RedactionMode,
   ToolJobRead,
@@ -36,11 +37,11 @@ export const toolsApi = {
       body: JSON.stringify({ document_id: documentId, categories }),
     })
   },
-  applyRedaction(jobId: number, findingIds: string[], mode: RedactionMode): Promise<ToolJobRead> {
+  applyRedaction(jobId: number, areas: RedactionArea[], mode: RedactionMode): Promise<ToolJobRead> {
     return requestJson(`/api/tools/jobs/${jobId}/apply-redaction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ finding_ids: findingIds, mode }),
+      body: JSON.stringify({ areas, mode }),
     })
   },
   pagePreviewUrl(jobId: number, page: number): string {

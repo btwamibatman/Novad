@@ -79,6 +79,37 @@ def test_redaction_requires_preview_and_physically_removes_selected_text(client)
     assert "test@example.com" not in result_text
 
 
+def test_redaction_accepts_manually_drawn_area(client):
+    document_id = _upload_private_pdf(client)
+    queued = client.post(
+        "/api/tools/redaction/preview",
+        json={"document_id": document_id, "categories": ["personal"]},
+    )
+    _run_tools()
+    job_id = queued.json()["id"]
+
+    applied = client.post(
+        f"/api/tools/jobs/{job_id}/apply-redaction",
+        json={
+            "areas": [
+                {
+                    "id": "manual-1",
+                    "page": 1,
+                    "rect": {"x": 0, "y": 0, "width": 100, "height": 100},
+                }
+            ],
+            "mode": "black",
+        },
+    )
+    assert applied.status_code == 202
+    _run_tools()
+
+    download = client.get(f"/api/tools/jobs/{job_id}/download")
+    assert download.status_code == 200
+    with pymupdf.open(stream=download.content, filetype="pdf") as document:
+        assert "123456789012" not in document[0].get_text()
+
+
 def test_pdf_to_word_uses_editable_local_pipeline(client):
     document_id = _upload_private_pdf(client)
     queued = client.post("/api/tools/pdf-to-word", json={"document_id": document_id})

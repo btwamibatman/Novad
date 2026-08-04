@@ -874,18 +874,32 @@ tbody tr[data-document-id]:hover {
   margin-bottom: 12px;
 }
 
+.review-toolbar > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.redaction-editor-help {
+  color: var(--text-soft);
+  font-weight: 400;
+}
+
 .redaction-preview {
   position: relative;
   width: min(100%, 900px);
   margin: 0 auto;
   border: 1px solid var(--border);
   background: #fff;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
 }
 
 .redaction-preview img {
   display: block;
   width: 100%;
   height: auto;
+  pointer-events: none;
 }
 
 .finding-overlay {
@@ -896,6 +910,11 @@ tbody tr[data-document-id]:hover {
   background: color-mix(in srgb, var(--danger) 28%, transparent);
   color: #fff;
   padding: 0;
+  cursor: default;
+}
+
+.finding-overlay.draft {
+  pointer-events: none;
 }
 
 .finding-overlay.excluded {
@@ -903,7 +922,7 @@ tbody tr[data-document-id]:hover {
   background: color-mix(in srgb, var(--muted) 20%, transparent);
 }
 
-.finding-overlay span {
+.finding-toggle {
   position: absolute;
   top: -11px;
   right: -9px;
@@ -913,8 +932,27 @@ tbody tr[data-document-id]:hover {
   place-items: center;
   border-radius: 50%;
   background: var(--danger);
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
   font-size: 11px;
 }
+
+.resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: var(--danger);
+  padding: 0;
+}
+
+.resize-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.resize-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.resize-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.resize-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
 
 .finding-list {
   max-height: 160px;

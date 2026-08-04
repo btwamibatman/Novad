@@ -77,10 +77,6 @@ const progress = computed(() => {
           <span class="detail-label">AI</span>
           <span><span class="badge" :class="aiClass">{{ t(`ai.${state}`) }}</span></span>
         </div>
-        <div v-if="document.ai_model" class="detail-row">
-          <span class="detail-label">{{ t('details.ai_model') }}</span>
-          <span>{{ document.ai_model }}</span>
-        </div>
         <div class="detail-row">
           <span class="detail-label">{{ t('details.updated') }}</span>
           <span>{{ new Date(document.updated_at).toLocaleString(locale) }}</span>

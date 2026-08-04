@@ -102,6 +102,12 @@ export interface RedactionFinding {
   rect: { x: number; y: number; width: number; height: number }
 }
 
+export interface RedactionArea {
+  id: string
+  page: number
+  rect: RedactionFinding['rect']
+}
+
 export interface ToolJobRead {
   id: number
   source_document_id: number | null

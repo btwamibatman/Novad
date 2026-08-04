@@ -9,12 +9,23 @@ import { useDocumentsStore } from '@/stores/documents'
 import type {
   CompressionMode,
   RedactionCategory,
+  RedactionFinding,
   RedactionMode,
   ToolJobRead,
 } from '@/types/document'
 import { formatBytes } from '@/utils/format'
 
 type Tool = 'redaction' | 'compression' | 'conversion'
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se'
+type RedactionRect = RedactionFinding['rect']
+
+interface RedactionInteraction {
+  kind: 'draw' | 'resize'
+  id?: string
+  handle?: ResizeHandle
+  start: { x: number; y: number }
+  original?: RedactionRect
+}
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
@@ -29,8 +40,13 @@ const categories = ref<RedactionCategory[]>(['personal', 'financial'])
 const redactionMode = ref<RedactionMode>('black')
 const redactionJobId = ref<number | null>(null)
 const selectedFindingIds = ref<string[]>([])
+const editableFindings = ref<RedactionFinding[]>([])
+const previewElement = ref<HTMLElement | null>(null)
+const draftRect = ref<RedactionRect | null>(null)
 const currentPage = ref(1)
 const submitting = ref(false)
+let interaction: RedactionInteraction | null = null
+let manualFindingSequence = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const pdfDocuments = computed(() =>
@@ -41,7 +57,7 @@ const redactionJob = computed(
 )
 const pageCount = computed(() => Number(redactionJob.value?.result_meta.page_count ?? 1))
 const pageFindings = computed(() =>
-  (redactionJob.value?.findings ?? []).filter((finding) => finding.page === currentPage.value),
+  editableFindings.value.filter((finding) => finding.page === currentPage.value),
 )
 const hasRunningJobs = computed(() =>
   jobs.value.some((job) => ['pending', 'running'].includes(job.status)),
@@ -51,7 +67,12 @@ watch(
   () => redactionJob.value?.status,
   (status) => {
     if (status === 'review' && redactionJob.value) {
-      selectedFindingIds.value = redactionJob.value.findings.map((finding) => finding.id)
+      editableFindings.value = redactionJob.value.findings.map((finding) => ({
+        ...finding,
+        rect: { ...finding.rect },
+        pdf_rect: [...finding.pdf_rect],
+      }))
+      selectedFindingIds.value = editableFindings.value.map((finding) => finding.id)
       currentPage.value = redactionJob.value.findings[0]?.page ?? 1
     }
   },
@@ -132,10 +153,112 @@ async function applyRedaction(): Promise<void> {
   await run(() =>
     toolsApi.applyRedaction(
       redactionJob.value!.id,
-      selectedFindingIds.value,
+      editableFindings.value
+        .filter((finding) => selectedFindingIds.value.includes(finding.id))
+        .map((finding) => ({ id: finding.id, page: finding.page, rect: finding.rect })),
       redactionMode.value,
     ),
   )
+}
+
+function previewPoint(event: PointerEvent): { x: number; y: number } | null {
+  const element = previewElement.value
+  if (!element) return null
+  const bounds = element.getBoundingClientRect()
+  if (!bounds.width || !bounds.height) return null
+  return {
+    x: Math.max(0, Math.min(100, ((event.clientX - bounds.left) / bounds.width) * 100)),
+    y: Math.max(0, Math.min(100, ((event.clientY - bounds.top) / bounds.height) * 100)),
+  }
+}
+
+function startDrawing(event: PointerEvent): void {
+  if ((event.target as HTMLElement).closest('.finding-overlay')) return
+  const point = previewPoint(event)
+  if (!point) return
+  event.preventDefault()
+  interaction = { kind: 'draw', start: point }
+  draftRect.value = { x: point.x, y: point.y, width: 0, height: 0 }
+}
+
+function startResize(event: PointerEvent, finding: RedactionFinding, handle: ResizeHandle): void {
+  const point = previewPoint(event)
+  if (!point) return
+  event.preventDefault()
+  event.stopPropagation()
+  interaction = {
+    kind: 'resize',
+    id: finding.id,
+    handle,
+    start: point,
+    original: { ...finding.rect },
+  }
+}
+
+function pointerMove(event: PointerEvent): void {
+  if (!interaction) return
+  const point = previewPoint(event)
+  if (!point) return
+  if (interaction.kind === 'draw') {
+    draftRect.value = {
+      x: Math.min(interaction.start.x, point.x),
+      y: Math.min(interaction.start.y, point.y),
+      width: Math.abs(point.x - interaction.start.x),
+      height: Math.abs(point.y - interaction.start.y),
+    }
+    return
+  }
+
+  const finding = editableFindings.value.find((item) => item.id === interaction?.id)
+  const original = interaction.original
+  const handle = interaction.handle
+  if (!finding || !original || !handle) return
+  const minSize = 0.5
+  const right = original.x + original.width
+  const bottom = original.y + original.height
+  const west = handle.includes('w')
+  const north = handle.includes('n')
+  const left = west ? Math.max(0, Math.min(point.x, right - minSize)) : original.x
+  const top = north ? Math.max(0, Math.min(point.y, bottom - minSize)) : original.y
+  const nextRight = west ? right : Math.min(100, Math.max(point.x, original.x + minSize))
+  const nextBottom = north ? bottom : Math.min(100, Math.max(point.y, original.y + minSize))
+  finding.rect = {
+    x: left,
+    y: top,
+    width: nextRight - left,
+    height: nextBottom - top,
+  }
+}
+
+function pointerUp(): void {
+  if (interaction?.kind === 'draw' && draftRect.value) {
+    const rect = draftRect.value
+    if (rect.width >= 0.5 && rect.height >= 0.5) {
+      const id = `manual-${Date.now()}-${manualFindingSequence++}`
+      editableFindings.value.push({
+        id,
+        page: currentPage.value,
+        group: 'personal',
+        category: 'MANUAL',
+        text: '',
+        confidence: 1,
+        pdf_rect: [],
+        rect: { ...rect },
+      })
+      selectedFindingIds.value.push(id)
+    }
+  }
+  interaction = null
+  draftRect.value = null
+}
+
+function cancelInteraction(): void {
+  if (interaction?.kind === 'resize' && interaction.original) {
+    const finding = editableFindings.value.find((item) => item.id === interaction?.id)
+    if (finding) finding.rect = interaction.original
+  }
+  interaction = null
+  draftRect.value = null
 }
 
 function toggleFinding(id: string): void {
@@ -149,6 +272,9 @@ function chooseFile(event: Event): void {
 }
 
 onMounted(async () => {
+  window.addEventListener('pointermove', pointerMove)
+  window.addEventListener('pointerup', pointerUp)
+  window.addEventListener('pointercancel', cancelInteraction)
   if (!documentsStore.documents.length) await documentsStore.load(false)
   selectedDocumentId.value = documentsStore.selectedId ?? pdfDocuments.value[0]?.id ?? null
   await loadJobs()
@@ -158,6 +284,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', pointerMove)
+  window.removeEventListener('pointerup', pointerUp)
+  window.removeEventListener('pointercancel', cancelInteraction)
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
@@ -249,32 +378,49 @@ onBeforeUnmount(() => {
 
         <div v-else class="redaction-review">
           <div class="review-toolbar">
-            <strong>{{ t('tools.redaction.found', { count: redactionJob.findings.length }) }}</strong>
+            <div>
+              <strong>{{ t('tools.redaction.found', { count: editableFindings.length }) }}</strong>
+              <small class="redaction-editor-help">{{ t('tools.redaction.editor_help') }}</small>
+            </div>
             <div class="page-switcher">
               <button class="icon-btn" type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button>
               <span>{{ currentPage }} / {{ pageCount }}</span>
               <button class="icon-btn" type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button>
             </div>
           </div>
-          <div class="redaction-preview">
+          <div ref="previewElement" class="redaction-preview" @pointerdown="startDrawing">
             <img :src="toolsApi.pagePreviewUrl(redactionJob.id, currentPage)" :alt="t('tools.redaction.page_preview', { page: currentPage })" />
-            <button
+            <div
               v-for="finding in pageFindings"
               :key="finding.id"
               class="finding-overlay"
               :class="{ excluded: !selectedFindingIds.includes(finding.id) }"
               :style="{ left: `${finding.rect.x}%`, top: `${finding.rect.y}%`, width: `${finding.rect.width}%`, height: `${finding.rect.height}%` }"
-              type="button"
-              :title="`${finding.category}: ${finding.text || t('tools.redaction.visual_item')}`"
-              @click="toggleFinding(finding.id)"
+              :title="`${finding.category}: ${finding.text || t(finding.category === 'MANUAL' ? 'tools.redaction.manual_item' : 'tools.redaction.visual_item')}`"
             >
-              <span>{{ selectedFindingIds.includes(finding.id) ? '✓' : '×' }}</span>
-            </button>
+              <button class="finding-toggle" type="button" @click.stop="toggleFinding(finding.id)">
+                {{ selectedFindingIds.includes(finding.id) ? '✓' : '×' }}
+              </button>
+              <button
+                v-for="handle in (['nw', 'ne', 'sw', 'se'] as ResizeHandle[])"
+                :key="handle"
+                class="resize-handle"
+                :class="`resize-${handle}`"
+                type="button"
+                :aria-label="t('tools.redaction.resize_area')"
+                @pointerdown="startResize($event, finding, handle)"
+              ></button>
+            </div>
+            <div
+              v-if="draftRect"
+              class="finding-overlay draft"
+              :style="{ left: `${draftRect.x}%`, top: `${draftRect.y}%`, width: `${draftRect.width}%`, height: `${draftRect.height}%` }"
+            ></div>
           </div>
           <div class="finding-list">
             <label v-for="finding in pageFindings" :key="finding.id">
               <input v-model="selectedFindingIds" type="checkbox" :value="finding.id" />
-              <span>{{ finding.category }} · {{ finding.text || t('tools.redaction.visual_item') }}</span>
+              <span>{{ finding.category }} · {{ finding.text || t(finding.category === 'MANUAL' ? 'tools.redaction.manual_item' : 'tools.redaction.visual_item') }}</span>
             </label>
           </div>
           <div class="apply-bar">

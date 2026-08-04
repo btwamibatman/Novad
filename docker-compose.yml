@@ -1,3 +1,9 @@
+x-default-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16
@@ -14,9 +20,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   api:
-    build: .
+    image: practice-task-tracker-api-app:local
+    build:
+      context: .
     env_file:
       - .env
     environment:
@@ -63,9 +72,10 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage
+    logging: *default-logging
 
   analysis-worker:
-    build: .
+    image: practice-task-tracker-api-app:local
     command: ["python", "-m", "app.analysis_worker"]
     env_file:
       - .env
@@ -83,6 +93,7 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage
+    logging: *default-logging
 
 volumes:
   postgres_data:

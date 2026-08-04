@@ -1,0 +1,2 @@
+# Install this file only from the official PyTorch CPU wheel index.
+torch==2.13.0+cpu

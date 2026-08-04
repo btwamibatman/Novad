@@ -51,7 +51,8 @@ Local development requires Python 3.12, LibreOffice, Ghostscript, and Tesseract 
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
+python -m pip install --index-url https://download.pytorch.org/whl/cpu -r requirements-torch-cpu.txt
+python -m pip install -r requirements-dev.txt
 python -m app.create_user admin
 uvicorn app.main:app --reload
 

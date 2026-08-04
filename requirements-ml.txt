@@ -1,0 +1,3 @@
+# Install requirements-torch-cpu.txt first so Stanza cannot pull a CUDA wheel.
+numpy==2.5.1
+stanza==1.14.0

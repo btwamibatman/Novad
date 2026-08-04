@@ -1,15 +1,20 @@
+# syntax=docker/dockerfile:1
+
 FROM node:24-alpine AS frontend-build
 
 WORKDIR /frontend
 
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 COPY frontend/ ./
 RUN npm run build
 
 
 FROM python:3.12-slim
+
+ARG PIP_VERSION=26.2
 
 WORKDIR /app
 
@@ -29,11 +34,22 @@ RUN apt-get update \
         tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+COPY requirements-torch-cpu.txt requirements-ml.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install "pip==${PIP_VERSION}" \
+    && python -m pip install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        -r requirements-torch-cpu.txt \
+    && python -m pip install -r requirements-ml.txt \
+    && python -m pip check
 
-RUN python -c "import stanza; [stanza.download(lang, model_dir='/opt/stanza_resources', processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    python -c "import stanza; [stanza.download(lang, model_dir='/opt/stanza_resources', processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
+
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements.txt \
+    && python -m pip check
 
 COPY . .
 COPY --from=frontend-build /app/web/dist /app/app/web/dist

@@ -7,6 +7,7 @@ const POLL_INTERVAL_MS = 1500
 export function useDocumentPolling(onError: (error: unknown) => void) {
   const documentsStore = useDocumentsStore()
   let timer: number | null = null
+  let stopped = false
 
   function clearTimer(): void {
     if (timer !== null) {
@@ -15,9 +16,12 @@ export function useDocumentPolling(onError: (error: unknown) => void) {
     }
   }
 
-  function schedule(): void {
+  function scheduleNext(): void {
     clearTimer()
-    if (!documentsStore.documents.some((document) => document.status === 'analyzing')) {
+    if (
+      stopped ||
+      !documentsStore.documents.some((document) => document.status === 'analyzing')
+    ) {
       return
     }
     timer = window.setTimeout(async () => {
@@ -26,12 +30,23 @@ export function useDocumentPolling(onError: (error: unknown) => void) {
         await documentsStore.load(false)
       } catch (error) {
         onError(error)
+        scheduleNext()
       }
     }, POLL_INTERVAL_MS)
   }
 
-  watch(() => documentsStore.documents, schedule, { deep: true })
-  onScopeDispose(clearTimer)
+  function schedule(): void {
+    stopped = false
+    scheduleNext()
+  }
 
-  return { schedule, stop: clearTimer }
+  function stop(): void {
+    stopped = true
+    clearTimer()
+  }
+
+  watch(() => documentsStore.documents, schedule, { deep: true })
+  onScopeDispose(stop)
+
+  return { schedule, stop }
 }

@@ -9,8 +9,10 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { aiAnalysisApi } from '@/api/ai'
 import { useDocumentChat } from '@/composables/useDocumentChat'
 import { useDocumentsStore } from '@/stores/documents'
+import type { AIProviderInfo } from '@/types/document'
 
 interface DragState {
   pointerId: number
@@ -26,6 +28,8 @@ const dragHandle = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
 const messageList = ref<HTMLElement | null>(null)
 const question = ref('')
+const providerInfo = ref<AIProviderInfo | null>(null)
+const providerInfoState = ref<'loading' | 'ready' | 'error'>('loading')
 let drag: DragState | null = null
 
 const positioned = computed(() => Boolean(chat.position.value) && !chat.maximized.value)
@@ -45,6 +49,20 @@ const stateText = computed(() =>
     ? t('chat.answering_from', { id: chat.selectedDocument.value.id })
     : t('chat.analyze_first'),
 )
+const providerDisclosure = computed(() => {
+  if (providerInfo.value) {
+    return t('chat.provider_disclosure', {
+      provider: providerInfo.value.provider,
+      model: providerInfo.value.model,
+      tier: providerInfo.value.service_tier,
+    })
+  }
+  return t(
+    providerInfoState.value === 'error'
+      ? 'chat.provider_unavailable'
+      : 'chat.provider_loading',
+  )
+})
 
 function move(left: number, top: number): void {
   if (!popup.value) return
@@ -144,9 +162,16 @@ watch(
   { deep: true },
 )
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('blur', stopDragOnBlur)
   window.addEventListener('resize', keepInsideViewport)
+  try {
+    providerInfo.value = await aiAnalysisApi.getProviderInfo()
+    providerInfoState.value = 'ready'
+  } catch {
+    providerInfo.value = null
+    providerInfoState.value = 'error'
+  }
 })
 
 onBeforeUnmount(() => {
@@ -199,24 +224,35 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div class="ai-chat-body">
-      <select
-        class="select"
-        :value="chat.selectedDocumentId.value ?? ''"
-        :aria-label="t('chat.document_select')"
-        :disabled="!chat.processedDocuments.value.length"
-        @change="changeDocument"
-      >
-        <option v-if="!chat.processedDocuments.value.length" value="">
-          {{ t('chat.no_processed') }}
-        </option>
-        <option
-          v-for="document in chat.processedDocuments.value"
-          :key="document.id"
-          :value="document.id"
+      <div class="ai-chat-context">
+        <select
+          class="select"
+          :value="chat.selectedDocumentId.value ?? ''"
+          :aria-label="t('chat.document_select')"
+          :disabled="!chat.processedDocuments.value.length"
+          @change="changeDocument"
         >
-          #{{ document.id }} {{ document.filename }}
-        </option>
-      </select>
+          <option v-if="!chat.processedDocuments.value.length" value="">
+            {{ t('chat.no_processed') }}
+          </option>
+          <option
+            v-for="document in chat.processedDocuments.value"
+            :key="document.id"
+            :value="document.id"
+          >
+            #{{ document.id }} {{ document.filename }}
+          </option>
+        </select>
+        <p class="control-help">
+          {{ t('chat.extracted_text_notice') }} {{ providerDisclosure }}
+          <a
+            v-if="providerInfo?.provider.toLowerCase() === 'gemini'"
+            href="https://ai.google.dev/gemini-api/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+          >{{ t('chat.provider_terms') }}</a>
+        </p>
+      </div>
       <div ref="messageList" class="ai-chat-messages">
         <div v-if="!chat.selectedDocument.value" class="empty">
           {{ t('chat.processed_appear') }}
@@ -259,3 +295,14 @@ onBeforeUnmount(() => {
     AI
   </button>
 </template>
+
+<style scoped>
+.ai-chat-context {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-chat-context .control-help {
+  margin: 0;
+}
+</style>

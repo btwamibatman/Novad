@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import MarkdownContent from '@/components/common/MarkdownContent.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
@@ -23,6 +24,13 @@ const pending = computed(
     document.value !== null &&
     documentsStore.isPending('content-review', document.value.id),
 )
+const protectedRoute = computed(() => ({
+  name: 'tools',
+  query: {
+    task: 'content_review',
+    ...(document.value ? { document_id: String(document.value.id) } : {}),
+  },
+}))
 const state = computed(() => {
   if (!document.value) return t('common.no_document_selected')
   if (document.value.content_review_error) return t('common.error')
@@ -79,6 +87,9 @@ async function review(): Promise<void> {
     <div class="panel-body">
       <p class="section-help">{{ t('content_review.notice') }}</p>
       <div class="review-controls">
+        <RouterLink class="button primary" :to="protectedRoute">
+          {{ t('content_review.protected_action') }}
+        </RouterLink>
         <select
           v-model="mode"
           class="select"
@@ -89,17 +100,19 @@ async function review(): Promise<void> {
           <option value="thorough">{{ t('content_review.thorough_short') }}</option>
         </select>
         <button
-          class="button primary"
+          class="button"
           :class="{ loading: pending }"
           type="button"
           :disabled="documentsStore.busy || document?.status !== 'processed'"
           :aria-busy="pending"
           @click="review"
         >
-          {{ pending ? t('content_review.reviewing') : t('content_review.action') }}
+          {{ pending ? t('content_review.reviewing') : t('content_review.legacy_action') }}
         </button>
       </div>
-      <p class="control-help">{{ t(`content_review.${mode}_help`) }}</p>
+      <p class="control-help">
+        {{ t('content_review.legacy_help') }} {{ t(`content_review.${mode}_help`) }}
+      </p>
       <MarkdownContent :content="content" />
     </div>
   </article>

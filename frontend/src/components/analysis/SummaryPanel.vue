@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
@@ -37,6 +38,13 @@ const summary = computed(() => {
 const pending = computed(
   () => document.value !== null && documentsStore.isPending('summarize', document.value.id),
 )
+const protectedRoute = computed(() => ({
+  name: 'tools',
+  query: {
+    task: 'summary',
+    ...(document.value ? { document_id: String(document.value.id) } : {}),
+  },
+}))
 
 async function summarize(): Promise<void> {
   if (!document.value) return
@@ -57,16 +65,22 @@ async function summarize(): Promise<void> {
     </div>
     <div class="panel-body">
       <p class="section-help">{{ t('summary.notice') }}</p>
-      <button
-        v-if="!document?.ai_summary"
-        class="button primary section-action"
-        type="button"
-        :class="{ loading: pending }"
-        :disabled="documentsStore.busy || document?.status !== 'processed'"
-        @click="summarize"
-      >
-        {{ pending ? t('documents.summarizing') : t('documents.summarize') }}
-      </button>
+      <div class="review-controls">
+        <RouterLink class="button primary" :to="protectedRoute">
+          {{ t('summary.protected_action') }}
+        </RouterLink>
+        <button
+          v-if="!document?.ai_summary"
+          class="button"
+          type="button"
+          :class="{ loading: pending }"
+          :disabled="documentsStore.busy || document?.status !== 'processed'"
+          @click="summarize"
+        >
+          {{ pending ? t('documents.summarizing') : t('summary.legacy_action') }}
+        </button>
+      </div>
+      <p class="control-help">{{ t('summary.legacy_help') }}</p>
       <div class="preview">{{ summary }}</div>
     </div>
   </article>

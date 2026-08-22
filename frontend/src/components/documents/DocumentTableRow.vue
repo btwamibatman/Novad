@@ -98,7 +98,7 @@ function primaryAction(): void {
               :disabled="documentsStore.busy || document.status !== 'processed'"
               @click="emit('summarize', document.id)"
             >
-              {{ t('documents.summarize') }}
+              {{ t('summary.legacy_action') }}
             </button>
             <button class="menu-action" type="button" :disabled="documentsStore.busy" @click="download">
               {{ t('documents.download') }}

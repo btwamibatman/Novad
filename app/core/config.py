@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,13 +18,20 @@ class Settings(BaseSettings):
     session_cleanup_interval_seconds: int = 900
     session_storage_quota_bytes: int = 500 * 1024 * 1024
     ai_provider: str = "gemini"
-    gemini_api_key: str | None = None
+    gemini_api_key: str | None = Field(default=None, repr=False)
     gemini_model: str = "gemini-2.5-flash"
     gemini_thinking_budget: int = 0
+    gemini_service_tier: Literal["unpaid", "paid"] = "unpaid"
     ai_summary_max_chars: int = 12000
     ai_summary_max_output_tokens: int = 1800
     ai_chat_timeout_seconds: int = 20
     ai_request_timeout_seconds: int = 45
+    ai_max_pdf_bytes: int = 50 * 1024 * 1024
+    ai_file_processing_timeout_seconds: int = 120
+    ai_job_max_attempts: int = 4
+    ai_job_stale_seconds: int = 300
+    ai_retry_base_seconds: int = 5
+    ai_provider_min_request_interval_seconds: int = 12
     content_review_quick_max_chars: int = 50000
     content_review_batch_max_chars: int = 10000
     content_review_thorough_max_batches: int = 6
@@ -83,6 +90,22 @@ class Settings(BaseSettings):
             raise ValueError("OCR_PAGE_TIMEOUT_SECONDS must be greater than zero")
         if self.analysis_worker_poll_seconds <= 0:
             raise ValueError("ANALYSIS_WORKER_POLL_SECONDS must be greater than zero")
+        if self.ai_job_max_attempts <= 0:
+            raise ValueError("AI_JOB_MAX_ATTEMPTS must be greater than zero")
+        if self.ai_max_pdf_bytes <= 0:
+            raise ValueError("AI_MAX_PDF_BYTES must be greater than zero")
+        if self.ai_file_processing_timeout_seconds <= 0:
+            raise ValueError(
+                "AI_FILE_PROCESSING_TIMEOUT_SECONDS must be greater than zero"
+            )
+        if self.ai_job_stale_seconds <= 0:
+            raise ValueError("AI_JOB_STALE_SECONDS must be greater than zero")
+        if self.ai_retry_base_seconds <= 0:
+            raise ValueError("AI_RETRY_BASE_SECONDS must be greater than zero")
+        if self.ai_provider_min_request_interval_seconds <= 0:
+            raise ValueError(
+                "AI_PROVIDER_MIN_REQUEST_INTERVAL_SECONDS must be greater than zero"
+            )
         if self.is_production and not self.session_cookie_name.startswith("__Host-"):
             self.session_cookie_name = f"__Host-{self.session_cookie_name}"
         return self

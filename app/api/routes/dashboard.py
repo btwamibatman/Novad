@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_session
 from app.core.database import get_db
 from app.models.document import Document
+from app.models.document_artifact import DocumentArtifact
 from app.models.session import UserSession
 from app.schemas.dashboard import DashboardSummary
 
@@ -44,6 +45,11 @@ def read_dashboard_summary(
             Document.status == "processed",
         )
     ).all()
+    artifact_storage_bytes = db.scalar(
+        select(func.coalesce(func.sum(DocumentArtifact.size_bytes), 0)).where(
+            DocumentArtifact.user_id == current_session.user_id
+        )
+    )
 
     detected_languages: dict[str, float] = {}
     for distribution in language_distributions:
@@ -56,6 +62,6 @@ def read_dashboard_summary(
         total_documents=row.total_documents or 0,
         processed_documents=row.processed_documents or 0,
         failed_documents=row.failed_documents or 0,
-        storage_bytes=row.storage_bytes or 0,
+        storage_bytes=(row.storage_bytes or 0) + (artifact_storage_bytes or 0),
         detected_languages=detected_languages,
     )

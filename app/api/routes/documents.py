@@ -19,6 +19,8 @@ from app.schemas.document import (
 from app.services.file_storage import remove_stored_file, resolve_stored_path, save_upload
 from app.services.rate_limit import enforce_rate_limit
 from app.services import ai_content_review, ai_layout_review, ai_summary
+from app.services.ai_analysis_jobs import AIAnalysisJobError, AIAnalysisJobsActive
+from app.services.ai_provider import AIProviderError, AIProviderNotConfigured
 from app.services.analysis_jobs import enqueue_analysis
 from app.services.pii_masking import (
     PIIMaskingError,
@@ -350,6 +352,17 @@ async def review_document_layout(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Layout review is available only for PDF documents",
         )
+    if (
+        settings.ai_provider.strip().lower() == "gemini"
+        and settings.gemini_service_tier == "unpaid"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Original PDF page images are blocked for unpaid Gemini. "
+                "Create a verified protected copy and run protected layout review."
+            ),
+        )
 
     try:
         result = await run_in_threadpool(
@@ -533,6 +546,22 @@ def delete_document(
 ) -> None:
     db_document = get_document_or_404(db, document_id, current_session.user_id)
     stored_path = db_document.stored_path
-    document_crud.delete_document(db, db_document)
+    try:
+        document_crud.delete_document(db, db_document)
+    except AIAnalysisJobsActive as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except (AIProviderNotConfigured, AIAnalysisJobError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="External AI copy cleanup is temporarily unavailable",
+        ) from error
+    except AIProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="External AI copy could not be deleted",
+        ) from error
     remove_stored_file(stored_path)
     return None

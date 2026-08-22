@@ -6,6 +6,7 @@ import time
 from app.core.config import settings
 from app.core.database import init_db
 from app.services.analysis_jobs import run_next_analysis_job
+from app.services.ai_analysis_jobs import run_next_ai_job
 from app.services.tool_jobs import run_next_tool_job
 
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +20,8 @@ def run_worker() -> None:
         try:
             analysis_processed = run_next_analysis_job()
             tool_processed = run_next_tool_job()
-            processed = analysis_processed or tool_processed
+            ai_processed = run_next_ai_job()
+            processed = analysis_processed or tool_processed or ai_processed
         except Exception:
             logger.exception("Document processing worker iteration failed")
             processed = False

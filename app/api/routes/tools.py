@@ -7,16 +7,21 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_document_or_404
 from app.core.database import get_db
+from app.models.document_artifact import DocumentArtifact
 from app.models.session import UserSession
 from app.models.tool_job import ToolJob
 from app.api.deps import get_current_session
 from app.schemas.tools import (
     CompressionRequest,
+    DocumentArtifactRead,
     PdfToWordRequest,
     RedactionApplyRequest,
     RedactionPreviewRequest,
     ToolJobRead,
 )
+from app.services import document_artifacts
+from app.services.ai_analysis_jobs import AIAnalysisJobError, AIAnalysisJobsActive
+from app.services.ai_provider import AIProviderError, AIProviderNotConfigured
 from app.services.document_tools import (
     DocumentToolError,
     render_pdf_page,
@@ -50,6 +55,88 @@ def read_job(
     current_session: UserSession = Depends(get_current_session),
 ) -> ToolJob:
     return _owned_job(db, job_id, current_session.user_id)
+
+
+@router.get("/artifacts", response_model=list[DocumentArtifactRead])
+def list_artifacts(
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> list[DocumentArtifact]:
+    return list(
+        db.scalars(
+            select(DocumentArtifact)
+            .where(DocumentArtifact.user_id == current_session.user_id)
+            .order_by(DocumentArtifact.created_at.desc(), DocumentArtifact.id.desc())
+            .limit(50)
+        )
+    )
+
+
+@router.get("/artifacts/{artifact_id}", response_model=DocumentArtifactRead)
+def read_artifact(
+    artifact_id: int,
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> DocumentArtifact:
+    return _owned_artifact(db, artifact_id, current_session.user_id)
+
+
+@router.get("/artifacts/{artifact_id}/pages/{page_number}")
+def preview_artifact_page(
+    artifact_id: int,
+    page_number: int,
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> Response:
+    artifact = _owned_artifact(db, artifact_id, current_session.user_id)
+    path = _available_artifact_path(artifact)
+    try:
+        data = render_pdf_page(path, page_number)
+    except DocumentToolError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@router.get("/artifacts/{artifact_id}/download")
+def download_artifact(
+    artifact_id: int,
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> FileResponse:
+    artifact = _owned_artifact(db, artifact_id, current_session.user_id)
+    path = _available_artifact_path(artifact)
+    return FileResponse(path, media_type=artifact.content_type, filename=artifact.filename)
+
+
+@router.delete("/artifacts/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_artifact(
+    artifact_id: int,
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> None:
+    artifact = _owned_artifact(db, artifact_id, current_session.user_id)
+    try:
+        document_artifacts.delete_artifact(db, artifact)
+    except AIAnalysisJobsActive as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except (AIProviderNotConfigured, AIAnalysisJobError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="External AI copy cleanup is temporarily unavailable",
+        ) from error
+    except AIProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="External AI copy could not be deleted",
+        ) from error
+    return None
 
 
 @router.post("/compress", response_model=ToolJobRead, status_code=status.HTTP_202_ACCEPTED)
@@ -224,6 +311,31 @@ def _owned_job(db: Session, job_id: int, user_id: int) -> ToolJob:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool job was not found")
     return job
+
+
+def _owned_artifact(db: Session, artifact_id: int, user_id: int) -> DocumentArtifact:
+    artifact = db.scalar(
+        select(DocumentArtifact).where(
+            DocumentArtifact.id == artifact_id,
+            DocumentArtifact.user_id == user_id,
+        )
+    )
+    if artifact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document artifact was not found",
+        )
+    return artifact
+
+
+def _available_artifact_path(artifact: DocumentArtifact) -> Path:
+    path = Path(artifact.stored_path)
+    if artifact.status not in {"ready_for_ai", "needs_review"} or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document artifact is not available",
+        )
+    return path
 
 
 def _pdf_document(db: Session, document_id: int, user_id: int):

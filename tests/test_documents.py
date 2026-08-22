@@ -693,6 +693,7 @@ def test_content_review_reports_synchronous_size_limit(
 
 
 def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, monkeypatch):
+    monkeypatch.setattr(settings, "gemini_service_tier", "paid")
     def fake_review(path: Path):
         assert path.exists()
         return ai_layout_review.LayoutReviewResult(
@@ -722,6 +723,20 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
     assert data["layout_review_meta"]["requested_dpi"] == 150
     assert data["layout_review_meta"]["external_processing"] is True
     assert data["layout_review_meta"]["external_image_processing_consent"] is True
+
+
+def test_unpaid_gemini_blocks_original_layout_images(
+    client, pdf_document_id, monkeypatch
+):
+    monkeypatch.setattr(settings, "gemini_service_tier", "unpaid")
+
+    response = client.post(
+        f"/api/documents/{pdf_document_id}/layout-review",
+        json={"consent_to_external_image_processing": True},
+    )
+
+    assert response.status_code == 409
+    assert "verified protected copy" in response.json()["detail"]
 
 
 def test_layout_review_requires_explicit_external_image_consent(

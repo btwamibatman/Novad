@@ -105,7 +105,7 @@ class PresidioRuleRecognizer:
     def create():
         from presidio_analyzer import EntityRecognizer, RecognizerResult
 
-        from app.services import document_redaction as rules
+        from app.services.documents import redaction as rules
 
         supported = [
             category
@@ -163,7 +163,7 @@ class KazakhstanIdentifierRecognizer:
     def create():
         from presidio_analyzer import EntityRecognizer, RecognizerResult
 
-        from app.services import document_redaction as rules
+        from app.services.documents import redaction as rules
 
         class _Recognizer(EntityRecognizer):
             def __init__(self) -> None:
@@ -412,7 +412,7 @@ def scan_pdf(
     progress=None,
 ) -> tuple[list[dict], dict]:
     """Stable PDF privacy-scan entrypoint used by redaction and verification."""
-    from app.services.document_redaction import detect_redactions
+    from app.services.documents.redaction import detect_redactions
 
     return detect_redactions(source, groups, progress)
 

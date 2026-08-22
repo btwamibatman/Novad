@@ -19,10 +19,10 @@ from app.schemas.tools import (
     RedactionPreviewRequest,
     ToolJobRead,
 )
-from app.services import document_artifacts
-from app.services.ai_analysis_jobs import AIAnalysisJobError, AIAnalysisJobsActive
-from app.services.ai_provider import AIProviderError, AIProviderNotConfigured
-from app.services.document_tools import (
+from app.services.documents import artifacts as document_artifacts
+from app.services.ai.jobs import AIAnalysisJobError, AIAnalysisJobsActive
+from app.services.ai.provider import AIProviderError, AIProviderNotConfigured
+from app.services.documents.tools import (
     DocumentToolError,
     render_pdf_page,
     save_word_upload,

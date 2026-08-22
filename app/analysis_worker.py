@@ -6,7 +6,7 @@ import time
 from app.core.config import settings
 from app.core.database import init_db
 from app.services.analysis_jobs import run_next_analysis_job
-from app.services.ai_analysis_jobs import run_next_ai_job
+from app.services.ai.jobs import run_next_ai_job
 from app.services.tool_jobs import run_next_tool_job
 
 logging.basicConfig(level=logging.INFO)

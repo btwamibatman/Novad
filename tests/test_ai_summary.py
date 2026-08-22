@@ -1,7 +1,7 @@
 from app.core.config import settings
-from app.services import ai_summary
-from app.services.ai_provider import AIGenerationResult
-from app.services.ai_summary import _build_prompt, _build_question_prompt
+from app.services.ai import summary as ai_summary
+from app.services.ai.provider import AIGenerationResult
+from app.services.ai.summary import _build_prompt, _build_question_prompt
 
 
 def test_ai_summary_prompt_requests_summary_without_visual_claims():

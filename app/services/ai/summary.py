@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 
 from app.core.config import settings
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIGenerationResult,
     AIProviderError,
     AIProviderNotConfigured,

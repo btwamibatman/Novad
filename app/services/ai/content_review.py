@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from typing import Literal, Protocol, Sequence
 
 from app.core.config import settings
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIGenerationResult,
     AIProviderError,
     AIProviderNotConfigured,
     DocumentAIProvider,
     get_ai_provider,
 )
-from app.services.document_chunks import CHUNK_OVERLAP_CHARS
+from app.services.documents.chunks import CHUNK_OVERLAP_CHARS
 
 ReviewMode = Literal["quick", "thorough"]
 MIN_CHUNK_OVERLAP_CHARS = 20

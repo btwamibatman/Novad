@@ -224,7 +224,7 @@ def update_document_layout_review(
 
 
 def delete_document(db: Session, db_document: Document) -> None:
-    from app.services.ai_analysis_jobs import delete_ai_jobs_for_artifacts
+    from app.services.ai.jobs import delete_ai_jobs_for_artifacts
 
     result_paths = {
         path

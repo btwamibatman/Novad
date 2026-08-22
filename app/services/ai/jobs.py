@@ -17,17 +17,17 @@ from app.models._utils import utc_now
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.document_artifact import DocumentArtifact
 from app.schemas.ai_analysis import AIAnalysisJobCreate
-from app.services.ai_document_analysis import (
+from app.services.ai.document_analysis import (
     ProtectedDocumentAnalysisError,
     analyze_protected_document,
 )
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIDocument,
     AIProviderError,
     AIRemoteDocument,
     get_ai_provider,
 )
-from app.services.document_artifacts import require_ai_ready_artifact
+from app.services.documents.artifacts import require_ai_ready_artifact
 from app.services.text_analysis import OCRExtractionError, extract_pdf_pages_with_ocr
 
 SessionFactory = Callable[[], Session]

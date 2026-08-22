@@ -5,7 +5,7 @@ import pytest
 
 from app.core.config import settings
 from app.crud.document import get_user_storage_bytes
-from app.services.document_artifacts import (
+from app.services.documents.artifacts import (
     ArtifactIntegrityError,
     ArtifactNotFoundError,
     ArtifactNotReadyError,
@@ -22,7 +22,7 @@ def available_local_ner(monkeypatch):
         lambda _text, _language, _groups: [],
     )
     monkeypatch.setattr(
-        "app.services.document_redaction._ocr_page_words",
+        "app.services.documents.redaction._ocr_page_words",
         lambda _page: _ocr_result("Public content"),
     )
 
@@ -137,7 +137,7 @@ def test_verifier_marks_artifact_with_remaining_pii_as_needs_review(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "app.services.document_redaction._ocr_page_words",
+        "app.services.documents.redaction._ocr_page_words",
         lambda _page: _ocr_result("IIN: 123456789012"),
     )
     document_id, _ = _upload(client)

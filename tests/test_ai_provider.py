@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
 
-from app.services import ai_provider
-from app.services.ai_provider import AIDocument, AIImage, AIRemoteDocument
+from app.services.ai import provider as ai_provider
+from app.services.ai.provider import AIDocument, AIImage, AIRemoteDocument
 from app.services.gemini_provider import GeminiProvider
 
 

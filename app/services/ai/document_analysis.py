@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.schemas.ai_analysis import AIAnalysisTask, ProtectedDocumentAnalysis
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIProviderError,
     AIRemoteDocument,
     DocumentAIProvider,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from app.core.config import settings
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIDocument,
     AIGenerationResult,
     AIImage,

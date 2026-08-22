@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIImage,
     AIProviderError,
     AIProviderNotConfigured,
     get_ai_provider,
 )
-from app.services.document_vision import (
+from app.services.documents.vision import (
     DocumentVisionError,
     RenderedDocument,
     render_pdf_for_layout_review,

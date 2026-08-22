@@ -1,7 +1,8 @@
 import pytest
 
-from app.services import ai_content_review, ai_summary
-from app.services.ai_content_review import ContentReviewResult
+from app.services.ai import summary as ai_summary
+from app.services.ai.content_review import ContentReviewResult
+from app.services.ai import content_review as ai_content_review
 from app.services.pii_masking import (
     PIIMaskingError,
     PIIMaskingSession,

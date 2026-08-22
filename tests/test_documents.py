@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from pypdf import PdfReader
 
 from app.core.config import settings
-from app.services import ai_content_review, ai_layout_review, text_analysis
+from app.services import text_analysis
+from app.services.ai import content_review as ai_content_review
+from app.services.ai import layout_review as ai_layout_review
 from app.services.file_storage import resolve_stored_path
 from tests.pdf_helpers import (
     make_pdf_with_text,

@@ -1,8 +1,8 @@
 import pytest
 
-from app.services import ai_content_review
-from app.services.ai_content_review import ReviewChunkData
-from app.services.ai_provider import AIGenerationResult
+from app.services.ai import content_review as ai_content_review
+from app.services.ai.content_review import ReviewChunkData
+from app.services.ai.provider import AIGenerationResult
 
 
 class FakeProvider:

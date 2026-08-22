@@ -310,7 +310,7 @@ def require_ai_ready_artifact(
 
 
 def delete_artifact(db: Session, artifact: DocumentArtifact) -> None:
-    from app.services.ai_analysis_jobs import delete_ai_jobs_for_artifacts
+    from app.services.ai.jobs import delete_ai_jobs_for_artifacts
 
     path = Path(artifact.stored_path)
     delete_ai_jobs_for_artifacts(db, [artifact.id])

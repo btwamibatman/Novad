@@ -11,7 +11,9 @@ from app.core.config import settings
 from app.core.database import create_session
 from app.models._utils import utc_now
 from app.models.tool_job import ToolJob
-from app.services import document_artifacts, document_redaction, document_tools
+from app.services.documents import artifacts as document_artifacts
+from app.services.documents import redaction as document_redaction
+from app.services.documents import tools as document_tools
 
 SessionFactory = Callable[[], Session]
 

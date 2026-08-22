@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.session import UserSession
 from app.schemas.ai_analysis import AIAnalysisJobCreate, AIAnalysisJobRead, AIProviderInfo
-from app.services.ai_analysis_jobs import (
+from app.services.ai.jobs import (
     AIAnalysisConsentRequired,
     AIAnalysisJobNotCancellable,
     AIAnalysisJobsActive,
@@ -17,8 +17,8 @@ from app.services.ai_analysis_jobs import (
     enqueue_ai_analysis,
     reconcile_expired_remote_files,
 )
-from app.services.ai_provider import AIProviderError, AIProviderNotConfigured
-from app.services.document_artifacts import (
+from app.services.ai.provider import AIProviderError, AIProviderNotConfigured
+from app.services.documents.artifacts import (
     ArtifactIntegrityError,
     ArtifactNotFoundError,
     ArtifactNotReadyError,

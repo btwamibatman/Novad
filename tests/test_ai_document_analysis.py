@@ -3,11 +3,11 @@ import json
 import pytest
 
 from app.schemas.ai_analysis import ProtectedDocumentAnalysis
-from app.services.ai_document_analysis import (
+from app.services.ai.document_analysis import (
     ProtectedDocumentOutputError,
     analyze_protected_document,
 )
-from app.services.ai_provider import AIGenerationResult, AIRemoteDocument
+from app.services.ai.provider import AIGenerationResult, AIRemoteDocument
 
 
 REMOTE = AIRemoteDocument(

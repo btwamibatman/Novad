@@ -2,10 +2,11 @@ import pymupdf
 import numpy as np
 import pytest
 
-from app.services import document_redaction, privacy_detection
+from app.services import privacy_detection
 from app.schemas.tools import RedactionPreviewRequest
-from app.services.document_artifacts import _inspect_pdf
-from app.services.document_redaction import (
+from app.services.documents.artifacts import _inspect_pdf
+from app.services.documents import redaction as document_redaction
+from app.services.documents.redaction import (
     TextCandidate,
     RedactionError,
     _alpha,

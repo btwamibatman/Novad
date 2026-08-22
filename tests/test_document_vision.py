@@ -3,9 +3,10 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from app.services import ai_layout_review, document_vision
-from app.services.ai_provider import AIGenerationResult
-from app.services.document_vision import RenderedDocument, RenderedPage
+from app.services.documents import vision as document_vision
+from app.services.ai.provider import AIGenerationResult
+from app.services.ai import layout_review as ai_layout_review
+from app.services.documents.vision import RenderedDocument, RenderedPage
 from tests.pdf_helpers import make_pdf_with_text
 
 

@@ -8,7 +8,7 @@ from app.services.privacy_detection import (
     validate_kz_iban,
     validate_luhn,
 )
-from app.services.document_redaction import validate_kz_identifier
+from app.services.documents.redaction import validate_kz_identifier
 
 
 def _valid_identifier(first_eleven: str) -> str:

@@ -9,17 +9,17 @@ from app.models._utils import utc_now
 from app.models.ai_analysis_job import AIAnalysisJob
 from app.models.document import Document
 from app.models.document_artifact import DocumentArtifact
-from app.services.ai_analysis_jobs import (
+from app.services.ai.jobs import (
     _commit_deduplicated_job,
     _stop_cancelled_job,
     run_next_ai_job,
 )
-from app.services.ai_provider import (
+from app.services.ai.provider import (
     AIGenerationResult,
     AIProviderError,
     AIRemoteDocument,
 )
-from app.services.document_artifacts import POLICY_VERSION, sha256_file
+from app.services.documents.artifacts import POLICY_VERSION, sha256_file
 from app.services.privacy_detection import PRIVACY_ENGINE_VERSION
 from tests.conftest import TestingSessionLocal
 from tests.pdf_helpers import make_pdf_with_text
@@ -267,7 +267,7 @@ def test_ai_job_uses_only_protected_artifact_and_deletes_one_shot_copy(
     artifact_id, protected_path, source_path = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
 
     response = _enqueue(client, artifact_id)
@@ -293,7 +293,7 @@ def test_retryable_provider_error_is_persistently_rescheduled(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider(fail_once=True)
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
 
     job_id = _enqueue(client, artifact_id).json()["id"]
@@ -335,7 +335,7 @@ def test_failed_job_releases_its_dedupe_key(
 
     monkeypatch.setattr(provider, "generate_document", failed_generation)
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     first_id = _enqueue(client, artifact_id).json()["id"]
 
@@ -355,7 +355,7 @@ def test_retained_remote_pdf_is_reused_and_revoked_for_all_linked_jobs(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
 
     first_id = _enqueue(
@@ -391,7 +391,7 @@ def test_expired_provider_file_is_reconciled_for_get_and_list(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     first_id = _enqueue(
         client, artifact_id, retention="retain_48h", task="content_review"
@@ -429,7 +429,7 @@ def test_enqueue_does_not_reuse_an_expired_provider_file(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     first_id = _enqueue(
         client, artifact_id, retention="retain_48h", task="content_review"
@@ -458,7 +458,7 @@ def test_shared_remote_file_cannot_be_deleted_while_a_linked_job_is_active(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
 
     first_id = _enqueue(
@@ -503,7 +503,7 @@ def test_failed_linked_job_cleanup_clears_shared_remote_references(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
 
     first_id = _enqueue(
@@ -550,7 +550,7 @@ def test_deleting_artifact_revokes_retained_provider_file(
     artifact_id, protected_path, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id, retention="retain_48h").json()["id"]
     assert run_next_ai_job(TestingSessionLocal) is True
@@ -569,7 +569,7 @@ def test_deleting_source_document_revokes_retained_provider_file(
     artifact_id, protected_path, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id, retention="retain_48h").json()["id"]
     assert run_next_ai_job(TestingSessionLocal) is True
@@ -586,7 +586,7 @@ def test_worker_reclaims_stale_running_job(client, pdf_document_id, monkeypatch)
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id).json()["id"]
     with TestingSessionLocal() as db:
@@ -619,7 +619,7 @@ def test_artifact_is_kept_when_remote_cleanup_fails(
     artifact_id, protected_path, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id, retention="retain_48h").json()["id"]
     assert run_next_ai_job(TestingSessionLocal) is True
@@ -650,7 +650,7 @@ def test_provider_file_processing_has_a_bounded_deadline(
         expires_at=provider.remote.expires_at,
     )
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     extraction_calls = []
 
@@ -659,7 +659,7 @@ def test_provider_file_processing_has_a_bounded_deadline(
         raise AssertionError("OCR must wait until the provider file is active")
 
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.extract_pdf_pages_with_ocr",
+        "app.services.ai.jobs.extract_pdf_pages_with_ocr",
         unexpected_extraction,
     )
     job_id = _enqueue(client, artifact_id).json()["id"]
@@ -686,7 +686,7 @@ def test_cache_does_not_reuse_a_job_with_different_retention_policy(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     retained_id = _enqueue(
         client,
@@ -723,7 +723,7 @@ def test_one_shot_cleanup_failure_is_visible_and_can_be_retried(
     )
     provider.fail_delete = True
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id).json()["id"]
 
@@ -753,7 +753,7 @@ def test_stale_cancelled_worker_is_reconciled_before_claiming_more_work(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id, retention="retain_48h").json()["id"]
     with TestingSessionLocal() as db:
@@ -786,7 +786,7 @@ def test_running_worker_observes_cancel_and_deletes_its_remote_copy(
     artifact_id, _, _ = _create_artifact(pdf_document_id)
     provider = FakeDocumentProvider()
     monkeypatch.setattr(
-        "app.services.ai_analysis_jobs.get_ai_provider", lambda: provider
+        "app.services.ai.jobs.get_ai_provider", lambda: provider
     )
     job_id = _enqueue(client, artifact_id).json()["id"]
     with TestingSessionLocal() as db:

@@ -16,18 +16,20 @@ from app.schemas.document import (
     DocumentRead,
     DocumentReviewRequest,
 )
+from app.services.ai import content_review as ai_content_review
+from app.services.ai import summary as ai_summary
 from app.services.file_storage import remove_stored_file, resolve_stored_path, save_upload
 from app.services.rate_limit import enforce_rate_limit
-from app.services import ai_content_review, ai_layout_review, ai_summary
-from app.services.ai_analysis_jobs import AIAnalysisJobError, AIAnalysisJobsActive
-from app.services.ai_provider import AIProviderError, AIProviderNotConfigured
+from app.services.ai import layout_review as ai_layout_review
+from app.services.ai.jobs import AIAnalysisJobError, AIAnalysisJobsActive
+from app.services.ai.provider import AIProviderError, AIProviderNotConfigured
 from app.services.analysis_jobs import enqueue_analysis
 from app.services.pii_masking import (
     PIIMaskingError,
     PIIMaskingSession,
     PIIMaskingUnavailable,
 )
-from app.services.document_chunks import (
+from app.services.documents.chunks import (
     format_chunks_for_context,
     select_relevant_chunks,
 )

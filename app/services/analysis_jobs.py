@@ -10,7 +10,7 @@ from app.crud import document as document_crud
 from app.models._utils import utc_now
 from app.models.analysis_job import AnalysisJob
 from app.models.document import Document
-from app.services.document_chunks import (
+from app.services.documents.chunks import (
     build_document_chunks,
     language_distribution,
     primary_language,

@@ -1,11 +1,14 @@
 from collections.abc import Iterable
+from pathlib import Path
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.models.document_artifact import DocumentArtifact
 from app.models.document_chunk import DocumentChunk
 from app.models.analysis_job import AnalysisJob
+from app.models.tool_job import ToolJob
 
 
 class DocumentChunkPayload:
@@ -52,7 +55,7 @@ def get_document_chunks(db: Session, document_id: int) -> list[DocumentChunk]:
 
 
 def get_user_storage_bytes(db: Session, user_id: int) -> int:
-    return int(
+    document_bytes = int(
         db.scalar(
             select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
                 Document.user_id == user_id
@@ -60,6 +63,15 @@ def get_user_storage_bytes(db: Session, user_id: int) -> int:
         )
         or 0
     )
+    artifact_bytes = int(
+        db.scalar(
+            select(func.coalesce(func.sum(DocumentArtifact.size_bytes), 0)).where(
+                DocumentArtifact.user_id == user_id
+            )
+        )
+        or 0
+    )
+    return document_bytes + artifact_bytes
 
 
 def create_document(
@@ -212,7 +224,35 @@ def update_document_layout_review(
 
 
 def delete_document(db: Session, db_document: Document) -> None:
+    from app.services.ai_analysis_jobs import delete_ai_jobs_for_artifacts
+
+    result_paths = {
+        path
+        for path in db.scalars(
+            select(ToolJob.result_path).where(
+                ToolJob.source_document_id == db_document.id,
+                ToolJob.result_path.is_not(None),
+            )
+        ).all()
+        if path
+    }
+    artifact_rows = db.execute(
+        select(DocumentArtifact.id, DocumentArtifact.stored_path).where(
+            DocumentArtifact.source_document_id == db_document.id
+        )
+    ).all()
+    artifact_ids = [row.id for row in artifact_rows]
+    result_paths.update(row.stored_path for row in artifact_rows)
+    delete_ai_jobs_for_artifacts(db, artifact_ids)
     db.execute(delete(AnalysisJob).where(AnalysisJob.document_id == db_document.id))
     db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == db_document.id))
+    db.execute(delete(ToolJob).where(ToolJob.source_document_id == db_document.id))
+    db.execute(
+        delete(DocumentArtifact).where(
+            DocumentArtifact.source_document_id == db_document.id
+        )
+    )
     db.delete(db_document)
     db.commit()
+    for stored_path in result_paths:
+        Path(stored_path).unlink(missing_ok=True)

@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 
 import { toolsApi } from '@/api/tools'
+import ProtectedArtifactAI from '@/components/tools/ProtectedArtifactAI.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
 import { useDocumentsStore } from '@/stores/documents'
 import type {
   CompressionMode,
+  AIAnalysisTask,
+  DocumentArtifactRead,
   RedactionCategory,
   RedactionFinding,
   RedactionMode,
@@ -28,17 +32,20 @@ interface RedactionInteraction {
 }
 
 const { t } = useI18n()
+const route = useRoute()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
 const activeTool = ref<Tool>('redaction')
 const jobs = ref<ToolJobRead[]>([])
+const artifacts = ref<DocumentArtifactRead[]>([])
 const selectedDocumentId = ref<number | null>(null)
 const compressionMode = ref<CompressionMode>('recommended')
 const wordFile = ref<File | null>(null)
-const categories = ref<RedactionCategory[]>(['personal', 'financial'])
+const categories = ref<RedactionCategory[]>(['personal', 'financial', 'visual'])
 const redactionMode = ref<RedactionMode>('black')
 const redactionJobId = ref<number | null>(null)
+const selectedArtifactId = ref<number | null>(null)
 const selectedFindingIds = ref<string[]>([])
 const editableFindings = ref<RedactionFinding[]>([])
 const previewElement = ref<HTMLElement | null>(null)
@@ -47,40 +54,160 @@ const currentPage = ref(1)
 const submitting = ref(false)
 let interaction: RedactionInteraction | null = null
 let manualFindingSequence = 0
+let hydratedReviewJobId: number | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const pdfDocuments = computed(() =>
   documentsStore.documents.filter((document) => document.content_type === 'application/pdf'),
 )
+const requestedTask = computed<AIAnalysisTask>(() => {
+  const raw = Array.isArray(route.query.task) ? route.query.task[0] : route.query.task
+  return raw === 'summary' || raw === 'content_review' || raw === 'layout_review'
+    ? raw
+    : 'content_review'
+})
+const requestedDocumentId = computed(() => {
+  const raw = Array.isArray(route.query.document_id)
+    ? route.query.document_id[0]
+    : route.query.document_id
+  const parsed = Number(raw)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+})
 const redactionJob = computed(
   () => jobs.value.find((job) => job.id === redactionJobId.value) ?? null,
 )
-const pageCount = computed(() => Number(redactionJob.value?.result_meta.page_count ?? 1))
+const protectedArtifact = computed(() => {
+  const linkedId = redactionJob.value?.result_artifact_id
+  const linked = artifacts.value.find((artifact) => artifact.id === linkedId)
+  if (linked) return linked
+  if (
+    redactionJob.value &&
+    ['pending', 'running', 'review'].includes(redactionJob.value.status)
+  ) {
+    return null
+  }
+  const explicitlySelected = artifacts.value.find(
+    (artifact) => artifact.id === selectedArtifactId.value,
+  )
+  if (explicitlySelected) return explicitlySelected
+  const sourceId = redactionJob.value?.source_document_id ?? selectedDocumentId.value
+  return artifacts.value.find((artifact) => artifact.source_document_id === sourceId) ?? null
+})
+const pageCount = computed(() => Math.max(1, Number(redactionJob.value?.result_meta.page_count ?? 1)))
 const pageFindings = computed(() =>
   editableFindings.value.filter((finding) => finding.page === currentPage.value),
 )
 const hasRunningJobs = computed(() =>
-  jobs.value.some((job) => ['pending', 'running'].includes(job.status)),
+  jobs.value.some((job) => ['pending', 'running'].includes(job.status)) ||
+  artifacts.value.some((artifact) => artifact.status === 'verifying'),
+)
+const sourceLocked = computed(
+  () =>
+    activeTool.value === 'redaction' &&
+    Boolean(redactionJob.value && ['pending', 'running', 'review'].includes(redactionJob.value.status)),
 )
 
 watch(
-  () => redactionJob.value?.status,
-  (status) => {
-    if (status === 'review' && redactionJob.value) {
-      editableFindings.value = redactionJob.value.findings.map((finding) => ({
+  () => [redactionJob.value?.id, redactionJob.value?.status] as const,
+  ([jobId, status]) => {
+    const job = redactionJob.value
+    if (job?.source_document_id && sourceLocked.value) {
+      selectedDocumentId.value = job.source_document_id
+    }
+    if (status === 'review' && job && hydratedReviewJobId !== jobId) {
+      hydratedReviewJobId = job.id
+      editableFindings.value = job.findings.map((finding) => ({
         ...finding,
         rect: { ...finding.rect },
         pdf_rect: [...finding.pdf_rect],
       }))
       selectedFindingIds.value = editableFindings.value.map((finding) => finding.id)
-      currentPage.value = redactionJob.value.findings[0]?.page ?? 1
+      currentPage.value = job.findings[0]?.page ?? 1
+    } else if (status !== 'review' && hydratedReviewJobId === jobId) {
+      hydratedReviewJobId = null
     }
   },
 )
 
-async function loadJobs(): Promise<void> {
+watch(activeTool, (tool) => {
+  if (tool === 'redaction' && redactionJob.value?.source_document_id && sourceLocked.value) {
+    selectedDocumentId.value = redactionJob.value.source_document_id
+  }
+})
+
+function restoreWorkspaceSelection(): void {
+  let job = jobs.value.find(
+    (item) => item.id === redactionJobId.value && item.kind === 'redaction',
+  )
+  if (!job) {
+    const preferredSourceId = selectedDocumentId.value
+    const restrictToRequestedDocument = requestedDocumentId.value === preferredSourceId
+    job =
+      jobs.value.find(
+        (item) =>
+          item.kind === 'redaction' &&
+          item.status === 'review' &&
+          item.source_document_id === preferredSourceId,
+      ) ??
+      (!restrictToRequestedDocument
+        ? jobs.value.find((item) => item.kind === 'redaction' && item.status === 'review')
+        : undefined) ??
+      jobs.value.find(
+        (item) =>
+          item.kind === 'redaction' &&
+          ['pending', 'running'].includes(item.status) &&
+          item.source_document_id === preferredSourceId,
+      ) ??
+      (!restrictToRequestedDocument
+        ? jobs.value.find(
+            (item) => item.kind === 'redaction' && ['pending', 'running'].includes(item.status),
+          )
+        : undefined) ??
+      jobs.value.find(
+        (item) =>
+          item.kind === 'redaction' &&
+          item.result_artifact_id !== null &&
+          item.source_document_id === preferredSourceId,
+      ) ??
+      (!restrictToRequestedDocument
+        ? jobs.value.find(
+            (item) => item.kind === 'redaction' && item.result_artifact_id !== null,
+          )
+        : undefined)
+  }
+  if (job) {
+    redactionJobId.value = job.id
+    if (activeTool.value === 'redaction' && job.source_document_id !== null) {
+      selectedDocumentId.value = job.source_document_id
+    }
+  }
+
+  const linkedArtifact = artifacts.value.find(
+    (artifact) => artifact.id === job?.result_artifact_id,
+  )
+  const currentArtifact = artifacts.value.find(
+    (artifact) => artifact.id === selectedArtifactId.value,
+  )
+  const sourceId = job?.source_document_id ?? selectedDocumentId.value
+  if (job && ['pending', 'running', 'review'].includes(job.status) && !linkedArtifact) {
+    selectedArtifactId.value = null
+    return
+  }
+  const sourceArtifact = artifacts.value.find(
+    (artifact) => artifact.source_document_id === sourceId,
+  )
+  selectedArtifactId.value = linkedArtifact?.id ?? currentArtifact?.id ?? sourceArtifact?.id ?? null
+}
+
+async function loadWorkspace(): Promise<void> {
   try {
-    jobs.value = await toolsApi.listJobs()
+    const [loadedJobs, loadedArtifacts] = await Promise.all([
+      toolsApi.listJobs(),
+      toolsApi.listArtifacts(),
+    ])
+    jobs.value = loadedJobs
+    artifacts.value = loadedArtifacts
+    restoreWorkspaceSelection()
   } catch (error) {
     handle(error)
   }
@@ -91,6 +218,10 @@ async function run(request: () => Promise<ToolJobRead>): Promise<void> {
   try {
     const job = await request()
     jobs.value = [job, ...jobs.value.filter((item) => item.id !== job.id)]
+    if (job.kind === 'redaction') {
+      redactionJobId.value = job.id
+      if (job.source_document_id !== null) selectedDocumentId.value = job.source_document_id
+    }
     show(t('tools.queued'), 'success')
   } catch (error) {
     handle(error)
@@ -271,15 +402,44 @@ function chooseFile(event: Event): void {
   wordFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
 }
 
+function sourceDocumentChanged(): void {
+  if (sourceLocked.value) return
+  if (
+    redactionJob.value &&
+    ['pending', 'running', 'review'].includes(redactionJob.value.status)
+  ) {
+    return
+  }
+  const sourceId = selectedDocumentId.value
+  const job = jobs.value.find(
+    (item) => item.kind === 'redaction' && item.source_document_id === sourceId,
+  )
+  redactionJobId.value = job?.id ?? null
+  selectedArtifactId.value =
+    artifacts.value.find((artifact) => artifact.source_document_id === sourceId)?.id ?? null
+  hydratedReviewJobId = null
+}
+
+function artifactDeleted(artifactId: number): void {
+  artifacts.value = artifacts.value.filter((artifact) => artifact.id !== artifactId)
+  if (selectedArtifactId.value === artifactId) selectedArtifactId.value = null
+  void loadWorkspace()
+}
+
 onMounted(async () => {
   window.addEventListener('pointermove', pointerMove)
   window.addEventListener('pointerup', pointerUp)
   window.addEventListener('pointercancel', cancelInteraction)
   if (!documentsStore.documents.length) await documentsStore.load(false)
-  selectedDocumentId.value = documentsStore.selectedId ?? pdfDocuments.value[0]?.id ?? null
-  await loadJobs()
+  const linkedDocumentId = pdfDocuments.value.some(
+    (document) => document.id === requestedDocumentId.value,
+  )
+    ? requestedDocumentId.value
+    : null
+  selectedDocumentId.value = linkedDocumentId ?? documentsStore.selectedId ?? pdfDocuments.value[0]?.id ?? null
+  await loadWorkspace()
   pollTimer = setInterval(() => {
-    if (hasRunningJobs.value) void loadJobs()
+    if (hasRunningJobs.value) void loadWorkspace()
   }, 1500)
 })
 
@@ -301,12 +461,18 @@ onBeforeUnmount(() => {
       </div>
       <label class="document-picker">
         <span>{{ t('tools.source_document') }}</span>
-        <select v-model="selectedDocumentId" class="select">
+        <select
+          v-model="selectedDocumentId"
+          class="select"
+          :disabled="sourceLocked"
+          @change="sourceDocumentChanged"
+        >
           <option :value="null">{{ t('tools.choose_pdf') }}</option>
           <option v-for="document in pdfDocuments" :key="document.id" :value="document.id">
             {{ document.filename }} · {{ formatBytes(document.size_bytes) }}
           </option>
         </select>
+        <small v-if="sourceLocked">{{ t('tools.redaction.source_locked') }}</small>
       </label>
     </header>
 
@@ -365,10 +531,23 @@ onBeforeUnmount(() => {
     <section v-else class="tool-workspace panel">
       <div class="panel-head"><h3 class="panel-title">{{ t('tools.redaction.title') }}</h3></div>
       <div class="panel-body">
-        <div v-if="redactionJob?.status !== 'review'" class="redaction-setup">
+        <div
+          v-if="redactionJob && ['pending', 'running'].includes(redactionJob.status)"
+          class="redaction-processing"
+        >
+          <p class="section-help">
+            {{ t('tools.redaction.protected_processing') }}
+          </p>
+          <div class="job-progress">
+            <progress :value="redactionJob.progress" max="100"></progress>
+            <span>{{ t(`tools.stage.${redactionJob.stage}`, redactionJob.stage) }} · {{ redactionJob.progress }}%</span>
+          </div>
+        </div>
+
+        <div v-else-if="redactionJob?.status !== 'review'" class="redaction-setup">
           <p class="section-help">{{ t('tools.redaction.help') }}</p>
           <div class="category-grid">
-            <label v-for="category in (['personal', 'financial', 'visual', 'service'] as RedactionCategory[])" :key="category" class="check-card">
+            <label v-for="category in (['personal', 'financial', 'visual', 'service', 'context'] as RedactionCategory[])" :key="category" class="check-card">
               <input v-model="categories" type="checkbox" :value="category" />
               <span><strong>{{ t(`tools.redaction.${category}`) }}</strong><small>{{ t(`tools.redaction.${category}_help`) }}</small></span>
             </label>
@@ -431,6 +610,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <ProtectedArtifactAI
+      v-if="activeTool === 'redaction' && protectedArtifact"
+      :key="protectedArtifact.id"
+      :artifact="protectedArtifact"
+      :source-job="redactionJob"
+      :initial-task="requestedTask"
+      @deleted="artifactDeleted"
+    />
 
     <section class="jobs-panel panel">
       <div class="panel-head"><h3 class="panel-title">{{ t('tools.jobs') }}</h3></div>

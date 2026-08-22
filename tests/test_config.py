@@ -53,3 +53,31 @@ def test_request_limit_must_allow_multipart_overhead():
 def test_pdf_page_limit_must_be_positive():
     with pytest.raises(ValidationError, match="MAX_PDF_PAGES must be greater than zero"):
         Settings(_env_file=None, max_pdf_pages=0)
+
+
+def test_ai_job_defaults_and_api_key_repr_are_safe():
+    test_settings = Settings(_env_file=None, gemini_api_key="top-secret")
+
+    assert test_settings.ai_job_max_attempts == 4
+    assert test_settings.ai_max_pdf_bytes == 50 * 1024 * 1024
+    assert test_settings.ai_file_processing_timeout_seconds == 120
+    assert test_settings.ai_job_stale_seconds == 300
+    assert test_settings.ai_retry_base_seconds == 5
+    assert test_settings.ai_provider_min_request_interval_seconds == 12
+    assert test_settings.gemini_service_tier == "unpaid"
+    assert "top-secret" not in repr(test_settings)
+
+
+def test_ai_job_stale_timeout_must_be_positive():
+    with pytest.raises(ValidationError, match="AI_JOB_STALE_SECONDS"):
+        Settings(_env_file=None, ai_job_stale_seconds=0)
+
+
+def test_ai_file_processing_timeout_must_be_positive():
+    with pytest.raises(ValidationError, match="AI_FILE_PROCESSING_TIMEOUT_SECONDS"):
+        Settings(_env_file=None, ai_file_processing_timeout_seconds=0)
+
+
+def test_ai_pdf_limit_must_be_positive():
+    with pytest.raises(ValidationError, match="AI_MAX_PDF_BYTES"):
+        Settings(_env_file=None, ai_max_pdf_bytes=0)

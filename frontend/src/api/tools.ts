@@ -1,6 +1,7 @@
 import { requestJson } from './client'
 import type {
   CompressionMode,
+  DocumentArtifactRead,
   RedactionArea,
   RedactionCategory,
   RedactionMode,
@@ -10,6 +11,12 @@ import type {
 export const toolsApi = {
   listJobs(): Promise<ToolJobRead[]> {
     return requestJson('/api/tools/jobs')
+  },
+  listArtifacts(): Promise<DocumentArtifactRead[]> {
+    return requestJson('/api/tools/artifacts')
+  },
+  getArtifact(artifactId: number): Promise<DocumentArtifactRead> {
+    return requestJson(`/api/tools/artifacts/${artifactId}`)
   },
   compress(documentId: number, mode: CompressionMode): Promise<ToolJobRead> {
     return requestJson('/api/tools/compress', {
@@ -49,5 +56,14 @@ export const toolsApi = {
   },
   downloadUrl(jobId: number): string {
     return `/api/tools/jobs/${jobId}/download`
+  },
+  artifactPagePreviewUrl(artifactId: number, page: number): string {
+    return `/api/tools/artifacts/${artifactId}/pages/${page}`
+  },
+  artifactDownloadUrl(artifactId: number): string {
+    return `/api/tools/artifacts/${artifactId}/download`
+  },
+  deleteArtifact(artifactId: number): Promise<void> {
+    return requestJson(`/api/tools/artifacts/${artifactId}`, { method: 'DELETE' })
   },
 }

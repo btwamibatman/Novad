@@ -5,8 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 CompressionMode = Literal["low", "recommended", "extreme"]
 ToolJobStatus = Literal["pending", "running", "review", "completed", "failed"]
+DocumentArtifactStatus = Literal[
+    "verifying", "ready_for_ai", "needs_review", "failed"
+]
 RedactionMode = Literal["black", "pseudonymize"]
-RedactionCategory = Literal["personal", "financial", "visual", "service"]
+RedactionCategory = Literal["personal", "financial", "visual", "service", "context"]
 
 
 class CompressionRequest(BaseModel):
@@ -21,7 +24,7 @@ class PdfToWordRequest(BaseModel):
 class RedactionPreviewRequest(BaseModel):
     document_id: int
     categories: list[RedactionCategory] = Field(
-        default_factory=lambda: ["personal", "financial"]
+        default_factory=lambda: ["personal", "financial", "visual"]
     )
 
 
@@ -58,10 +61,46 @@ class ToolJobRead(BaseModel):
     result_filename: str | None
     result_content_type: str | None
     result_size_bytes: int | None
+    result_artifact_id: int | None
     result_meta: dict = Field(default_factory=dict)
     error_message: str | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentPrivacyPolicy(BaseModel):
+    categories: list[RedactionCategory] = Field(default_factory=list)
+    redaction_mode: RedactionMode | None = None
+    selected_finding_count: int = 0
+    manual_confirmation: bool = False
+    flattened: bool = False
+    selectable_text: bool = True
+    render_dpi: int | None = None
+    image_format: str | None = None
+    jpeg_quality: int | None = None
+
+
+class DocumentArtifactRead(BaseModel):
+    id: int
+    source_document_id: int
+    kind: str
+    status: DocumentArtifactStatus
+    filename: str
+    content_type: str
+    size_bytes: int
+    source_sha256: str
+    artifact_sha256: str
+    privacy_policy: DocumentPrivacyPolicy = Field(default_factory=DocumentPrivacyPolicy)
+    policy_version: str
+    detector_version: str
+    coverage_report: dict = Field(default_factory=dict)
+    verification_report: dict = Field(default_factory=dict)
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+    verified_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)

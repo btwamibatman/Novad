@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import math
 from pathlib import Path
 import re
 import string
@@ -14,6 +15,17 @@ from app.core.config import settings
 
 class RedactionError(RuntimeError):
     pass
+
+
+PROTECTED_PDF_RENDER_DPI = 200
+PROTECTED_PDF_JPEG_QUALITY = 90
+PROTECTED_PDF_RENDER_PROFILES = (
+    (PROTECTED_PDF_RENDER_DPI, PROTECTED_PDF_JPEG_QUALITY),
+    (180, 85),
+    (150, 80),
+    (120, 70),
+    (96, 60),
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +47,14 @@ class TextCandidate:
     end: int
     confidence: float
     priority: int
+
+
+@dataclass(frozen=True)
+class PageTextLayer:
+    source: str
+    words: list[dict]
+    text: str
+    confidence: float | None = None
 
 
 CYRILLIC_UPPER = "А-ЯӘҒҚҢӨҰҮҺЁІ"
@@ -139,9 +159,23 @@ TEXT_PATTERNS: tuple[TextPattern, ...] = (
     TextPattern(
         "financial",
         "AMOUNT",
-        re.compile(r"(?<!\w)\d[\d\s]*(?:[.,]\d+)?\s*(?:₸|₽|\$|€|тенге|KZT|RUB|USD|EUR)\b", re.I),
+        re.compile(
+            r"(?<!\w)\d[\d\s]*(?:[.,]\d+)?\s*"
+            r"(?:(?:₸|₽|\$|€)(?!\w)|(?:тенге|руб(?:лей|ля)?|KZT|RUB|USD|EUR)\b)",
+            re.I,
+        ),
         0.95,
         80,
+    ),
+    TextPattern(
+        "context",
+        "DATE",
+        re.compile(
+            r"(?<!\d)(?:0?[1-9]|[12]\d|3[01])[./-]"
+            r"(?:0?[1-9]|1[0-2])[./-](?:19|20)\d{2}(?!\d)"
+        ),
+        0.9,
+        50,
     ),
     TextPattern("service", "DOC_ID", DOC_ID_MARKED_PATTERN, 0.94, 75, "value"),
     TextPattern("service", "DOC_ID", DOC_ID_NUMERIC_PATTERN, 0.9, 75, "value"),
@@ -352,31 +386,143 @@ def detect_redactions(
     categories: set[str],
     progress=None,
 ) -> tuple[list[dict], dict]:
+    from app.services.privacy_detection import PRIVACY_ENGINE_VERSION, PrivacyEngine
+
     findings: list[dict] = []
+    failures: list[dict] = []
+    coverage_pages: list[dict] = []
+    native_text_pages = 0
+    ocr_pages = 0
+    engine = PrivacyEngine()
     try:
         with pymupdf.open(source) as document:
             if document.needs_pass:
                 raise RedactionError("Password-protected PDFs are not supported")
             page_count = document.page_count
             for page_index, page in enumerate(document):
-                words, text = _page_words(page)
-                for candidate in find_text_candidates(text, categories):
-                    rect = _span_rect(words, candidate.start, candidate.end)
-                    if rect is None:
-                        continue
-                    findings.append(
-                        _finding(
-                            page_index + 1,
-                            candidate.group,
-                            candidate.category,
-                            candidate.text,
-                            rect,
-                            page.rect,
-                            confidence=candidate.confidence,
-                        )
+                page_number = page_index + 1
+                page_failures: list[dict] = []
+                layers: list[PageTextLayer] = []
+                try:
+                    native_words, native_text = _native_page_words(page)
+                    if native_words:
+                        native_text_pages += 1
+                        layers.append(PageTextLayer("native", native_words, native_text))
+                except Exception as error:
+                    native_text = ""
+                    page_failures.append(
+                        _detector_failure(page_number, "native_text", error)
                     )
+
+                try:
+                    ocr_required = _page_requires_ocr(page, native_text)
+                except Exception as error:
+                    # If image inspection fails, OCR is the safer fallback and the
+                    # inspection failure remains visible in coverage metadata.
+                    ocr_required = True
+                    page_failures.append(
+                        _detector_failure(page_number, "image_inspection", error)
+                    )
+                ocr_status = "not_required"
+                if ocr_required:
+                    try:
+                        ocr_words, ocr_text, ocr_confidence = _ocr_page_words(page)
+                        if not ocr_words and _page_has_visible_content(page):
+                            raise RedactionError(
+                                "OCR returned no readable text for a non-empty page"
+                            )
+                        layers.append(
+                            PageTextLayer(
+                                "ocr",
+                                ocr_words,
+                                ocr_text,
+                                confidence=ocr_confidence,
+                            )
+                        )
+                        ocr_pages += 1
+                        ocr_status = "checked"
+                    except Exception as error:
+                        ocr_status = "failed"
+                        page_failures.append(
+                            _detector_failure(page_number, "ocr", error)
+                        )
+
+                detectors: set[str] = set()
+                for layer in layers:
+                    detection = engine.detect_text(
+                        layer.text,
+                        categories,
+                        include_ner=True,
+                        fail_closed=False,
+                    )
+                    detectors.update(detection.detectors)
+                    for failure in detection.failures:
+                        item = failure.as_dict()
+                        item.update({"page": page_number, "source": layer.source})
+                        page_failures.append(item)
+                    for candidate in detection.spans:
+                        rect = _span_rect(layer.words, candidate.start, candidate.end)
+                        if rect is None:
+                            page_failures.append(
+                                {
+                                    "page": page_number,
+                                    "detector": "coordinate_mapping",
+                                    "source": layer.source,
+                                    "category": candidate.category,
+                                    "message": "Detected text could not be mapped to PDF coordinates",
+                                }
+                            )
+                            continue
+                        confidence = candidate.confidence
+                        if layer.confidence is not None:
+                            confidence = min(confidence, max(layer.confidence, 1) / 100)
+                        findings.append(
+                            _finding(
+                                page_number,
+                                candidate.group,
+                                candidate.category,
+                                candidate.text,
+                                rect,
+                                page.rect,
+                                confidence=confidence,
+                                source=layer.source,
+                                recognizer=candidate.recognizer,
+                                review_required=(
+                                    candidate.review_required
+                                    or layer.source == "ocr"
+                                    or confidence < 0.9
+                                ),
+                            )
+                        )
+
+                visual_status = "not_requested"
                 if "visual" in categories:
-                    findings.extend(_visual_findings(page, page_index + 1))
+                    try:
+                        visual_findings, visual_failures, visual_detectors = (
+                            _visual_findings(page, page_number)
+                        )
+                        findings.extend(visual_findings)
+                        page_failures.extend(visual_failures)
+                        detectors.update(visual_detectors)
+                        visual_status = "partial" if visual_failures else "checked"
+                    except Exception as error:
+                        visual_status = "failed"
+                        page_failures.append(
+                            _detector_failure(page_number, "visual", error)
+                        )
+                page_failures = _deduplicate_failures(page_failures)
+                failures.extend(page_failures)
+                coverage_pages.append(
+                    {
+                        "page": page_number,
+                        "complete": not page_failures,
+                        "native_text": bool(native_text),
+                        "ocr_required": ocr_required,
+                        "ocr_status": ocr_status,
+                        "visual_status": visual_status,
+                        "detectors": sorted(detectors),
+                    }
+                )
                 if progress:
                     progress(
                         10 + int(((page_index + 1) / max(page_count, 1)) * 80),
@@ -389,11 +535,25 @@ def detect_redactions(
     findings = _deduplicate(findings)
     for index, finding in enumerate(findings, start=1):
         finding["id"] = f"finding-{index}"
+    checked_pages = [item["page"] for item in coverage_pages if item["complete"]]
+    unchecked_pages = [item["page"] for item in coverage_pages if not item["complete"]]
     return findings, {
         "page_count": page_count,
         "finding_count": len(findings),
         "categories": sorted(categories),
         "requires_confirmation": True,
+        "automatic_detection": True,
+        "local_only": True,
+        "engine_version": PRIVACY_ENGINE_VERSION,
+        "native_text_page_count": native_text_pages,
+        "ocr_page_count": ocr_pages,
+        "detector_failures": _deduplicate_failures(failures),
+        "coverage": {
+            "complete": not unchecked_pages,
+            "checked_pages": checked_pages,
+            "unchecked_pages": unchecked_pages,
+            "pages": coverage_pages,
+        },
     }
 
 
@@ -432,6 +592,7 @@ def apply_redactions(
                     progress(15 + int((completed / len(by_page)) * 65), "redacting")
             if progress:
                 progress(85, "sanitizing")
+            _remove_interactive_content(document)
             document.scrub(
                 attached_files=True,
                 clean_pages=True,
@@ -446,19 +607,12 @@ def apply_redactions(
                 thumbnails=True,
                 xml_metadata=True,
             )
-            document.save(
-                destination,
-                garbage=4,
-                clean=True,
-                deflate=True,
-                deflate_images=True,
-                deflate_fonts=True,
-                use_objstms=1,
-            )
+            flatten_meta = _save_flattened_pdf(document, destination, progress)
         with pymupdf.open(destination) as check:
             if check.page_count < 1:
                 raise RedactionError("The redacted PDF is invalid")
     except RedactionError:
+        destination.unlink(missing_ok=True)
         raise
     except Exception as error:
         destination.unlink(missing_ok=True)
@@ -469,8 +623,85 @@ def apply_redactions(
         "mode": mode,
         "redacted_count": len(selected),
         "sanitized": True,
+        "flattened": True,
+        "selectable_text": False,
+        "render_dpi": flatten_meta["render_dpi"],
+        "image_format": "jpeg",
+        "jpeg_quality": flatten_meta["jpeg_quality"],
         "manual_confirmation": True,
     }
+
+
+def _remove_interactive_content(document) -> None:
+    """Remove structures which can retain PII outside visible page content."""
+    document.set_toc([])
+    for page_number in range(document.page_count):
+        page = document.load_page(page_number)
+        while page.first_annot is not None:
+            page.delete_annot(page.first_annot)
+        while page.first_widget is not None:
+            page.delete_widget(page.first_widget)
+
+
+def _save_flattened_pdf(document, destination: Path, progress=None) -> dict:
+    """Rebuild from pixels and keep the result within the provider PDF limit."""
+    for dpi, jpeg_quality in PROTECTED_PDF_RENDER_PROFILES:
+        _render_flattened_pdf(
+            document,
+            destination,
+            dpi=dpi,
+            jpeg_quality=jpeg_quality,
+            progress=progress,
+        )
+        if destination.stat().st_size <= settings.ai_max_pdf_bytes:
+            return {"render_dpi": dpi, "jpeg_quality": jpeg_quality}
+        destination.unlink(missing_ok=True)
+    raise RedactionError(
+        "Protected PDF exceeds the configured AI upload limit after safe compression"
+    )
+
+
+def _render_flattened_pdf(
+    document,
+    destination: Path,
+    *,
+    dpi: int,
+    jpeg_quality: int,
+    progress=None,
+) -> None:
+    flattened = pymupdf.open()
+    try:
+        page_count = document.page_count
+        for page_index, page in enumerate(document):
+            pixmap = page.get_pixmap(
+                dpi=dpi,
+                alpha=False,
+                annots=False,
+            )
+            image = pixmap.tobytes(
+                "jpeg",
+                jpg_quality=jpeg_quality,
+            )
+            target = flattened.new_page(
+                width=page.rect.width,
+                height=page.rect.height,
+            )
+            target.insert_image(target.rect, stream=image)
+            if progress:
+                progress(
+                    85 + int(((page_index + 1) / max(page_count, 1)) * 10),
+                    "flattening",
+                )
+        flattened.save(
+            destination,
+            garbage=4,
+            clean=True,
+            deflate=True,
+            deflate_images=True,
+            use_objstms=1,
+        )
+    finally:
+        flattened.close()
 
 
 def findings_from_areas(source: Path, findings: list[dict], areas: list[dict]) -> list[dict]:
@@ -509,6 +740,14 @@ def findings_from_areas(source: Path, findings: list[dict], areas: list[dict]) -
 
 
 def _page_words(page) -> tuple[list[dict], str]:
+    items, text = _native_page_words(page)
+    if items:
+        return items, text
+    items, text, _ = _ocr_page_words(page)
+    return items, text
+
+
+def _native_page_words(page) -> tuple[list[dict], str]:
     items: list[dict] = []
     parts: list[str] = []
     cursor = 0
@@ -527,66 +766,113 @@ def _page_words(page) -> tuple[list[dict], str]:
         cursor += len(word)
         items.append({"start": start, "end": cursor, "rect": pymupdf.Rect(raw[:4])})
         previous_line = current_line
-    if items:
-        return items, "".join(parts)
-    return _ocr_page_words(page)
+    return items, "".join(parts)
 
 
-def _ocr_page_words(page) -> tuple[list[dict], str]:
-    try:
-        import pytesseract
-        from pytesseract import Output
+def _ocr_page_words(page) -> tuple[list[dict], str, float | None]:
+    import pytesseract
+    from pytesseract import Output
 
-        scale = 200 / 72
-        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-        image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
-            pixmap.height, pixmap.width, pixmap.n
-        )[:, :, :3]
-        data = pytesseract.image_to_data(
-            image,
-            lang=settings.ocr_languages,
-            output_type=Output.DICT,
-            timeout=settings.ocr_page_timeout_seconds,
+    dpi = _privacy_ocr_dpi(page)
+    scale = dpi / 72
+    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+    image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+        pixmap.height, pixmap.width, pixmap.n
+    )[:, :, :3]
+    data = pytesseract.image_to_data(
+        image,
+        lang=settings.ocr_languages,
+        config="--oem 1 --psm 3 -c preserve_interword_spaces=1",
+        output_type=Output.DICT,
+        timeout=settings.ocr_page_timeout_seconds,
+    )
+    items: list[dict] = []
+    parts: list[str] = []
+    confidences: list[float] = []
+    cursor = 0
+    previous_line = None
+    values = data.get("text", [])
+    for index, value in enumerate(values):
+        word = str(value).strip()
+        try:
+            confidence = float(data["conf"][index])
+        except (KeyError, TypeError, ValueError):
+            confidence = -1
+        # Keep low-confidence tokens for privacy recall. They remain marked for
+        # human review through the layer confidence in the resulting finding.
+        if not word or confidence < 0:
+            continue
+        current_line = (
+            data.get("block_num", [0] * len(values))[index],
+            data.get("par_num", [0] * len(values))[index],
+            data.get("line_num", [0] * len(values))[index],
         )
-        items: list[dict] = []
-        parts: list[str] = []
-        cursor = 0
-        previous_line = None
-        for index, value in enumerate(data.get("text", [])):
-            word = str(value).strip()
-            try:
-                confidence = float(data["conf"][index])
-            except (KeyError, TypeError, ValueError):
-                confidence = -1
-            if not word or confidence < 30:
-                continue
-            current_line = (
-                data.get("block_num", [0] * len(data["text"]))[index],
-                data.get("par_num", [0] * len(data["text"]))[index],
-                data.get("line_num", [0] * len(data["text"]))[index],
-            )
-            if parts:
-                separator = "\n" if previous_line != current_line else " "
-                parts.append(separator)
-                cursor += 1
-            start = cursor
-            parts.append(word)
-            cursor += len(word)
-            x = float(data["left"][index]) / scale
-            y = float(data["top"][index]) / scale
-            width = float(data["width"][index]) / scale
-            height = float(data["height"][index]) / scale
-            items.append(
-                {
-                    "start": start,
-                    "end": cursor,
-                    "rect": pymupdf.Rect(x, y, x + width, y + height),
-                }
-            )
-            previous_line = current_line
-        return items, "".join(parts)
-    except Exception:
-        return [], ""
+        if parts:
+            separator = "\n" if previous_line != current_line else " "
+            parts.append(separator)
+            cursor += 1
+        start = cursor
+        parts.append(word)
+        cursor += len(word)
+        x = float(data["left"][index]) / scale
+        y = float(data["top"][index]) / scale
+        width = float(data["width"][index]) / scale
+        height = float(data["height"][index]) / scale
+        items.append(
+            {
+                "start": start,
+                "end": cursor,
+                "rect": pymupdf.Rect(x, y, x + width, y + height),
+                "confidence": confidence,
+            }
+        )
+        confidences.append(confidence)
+        previous_line = current_line
+    mean_confidence = sum(confidences) / len(confidences) if confidences else None
+    return items, "".join(parts), mean_confidence
+
+
+def _page_requires_ocr(page, native_text: str) -> bool:
+    signal = sum(character.isalnum() for character in native_text)
+    if signal < settings.ocr_min_text_signal_chars:
+        return True
+    page_area = max(page.rect.get_area(), 1)
+    for image in page.get_image_info(xrefs=True):
+        bbox = pymupdf.Rect(image.get("bbox", (0, 0, 0, 0)))
+        if bbox.get_area() / page_area >= 0.01:
+            return True
+    return False
+
+
+def _page_has_visible_content(page) -> bool:
+    pixmap = page.get_pixmap(dpi=72, alpha=False, annots=False)
+    samples = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+        pixmap.height,
+        pixmap.width,
+        pixmap.n,
+    )[:, :, :3]
+    non_white = int(np.count_nonzero(np.min(samples, axis=2) < 245))
+    threshold = max(16, int(pixmap.width * pixmap.height * 0.00002))
+    return non_white >= threshold
+
+
+def _privacy_ocr_dpi(page) -> int:
+    requested = settings.ocr_render_dpi
+    pixels = page.rect.width * requested / 72 * page.rect.height * requested / 72
+    if pixels <= settings.ocr_max_pixels_per_page:
+        return requested
+    limited = math.floor(
+        72
+        * math.sqrt(
+            settings.ocr_max_pixels_per_page
+            / max(page.rect.width * page.rect.height, 1)
+        )
+    )
+    if limited < settings.ocr_min_render_dpi:
+        raise RedactionError(
+            "Page exceeds the privacy OCR pixel limit at the minimum DPI"
+        )
+    return limited
 
 
 def _span_rect(words: list[dict], start: int, end: int):
@@ -599,47 +885,218 @@ def _span_rect(words: list[dict], start: int, end: int):
     return rect + (-1.5, -1.5, 1.5, 1.5)
 
 
-def _visual_findings(page, page_number: int) -> list[dict]:
-    try:
-        import cv2
+def _detector_failure(page_number: int, detector: str, error: Exception) -> dict:
+    message = str(error).strip() or error.__class__.__name__
+    return {
+        "page": page_number,
+        "detector": detector,
+        "message": message[:240],
+    }
 
-        scale = 150 / 72
-        pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-        image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, pixmap.n)
-        rgb = image[:, :, :3]
-        findings: list[dict] = []
-        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
-        cascade = cv2.CascadeClassifier(cascade_path)
-        for x, y, width, height in cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(28, 28)):
-            findings.append(_visual_finding(page, page_number, "FACE", x, y, width, height, scale, 0.86))
 
-        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-        blue = cv2.inRange(hsv, np.array([85, 45, 35]), np.array([140, 255, 255]))
-        red = cv2.inRange(hsv, np.array([0, 55, 40]), np.array([12, 255, 255])) | cv2.inRange(
-            hsv, np.array([165, 55, 40]), np.array([179, 255, 255])
+def _deduplicate_failures(failures: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    seen: set[tuple] = set()
+    for failure in failures:
+        key = (
+            failure.get("page"),
+            failure.get("detector"),
+            failure.get("language"),
+            failure.get("source"),
+            failure.get("category"),
+            failure.get("message"),
         )
-        mask = cv2.morphologyEx(blue | red, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-        for contour in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
-            x, y, width, height = cv2.boundingRect(contour)
-            area = width * height
-            if area < 900 or width < 25 or height < 12:
-                continue
-            ratio = width / max(height, 1)
-            category = "SEAL" if 0.65 <= ratio <= 1.55 and area >= 1800 else "SIGNATURE"
-            findings.append(_visual_finding(page, page_number, category, x, y, width, height, scale, 0.7))
-        return findings
-    except Exception:
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(failure)
+    return result
+
+
+def _visual_findings(page, page_number: int) -> tuple[list[dict], list[dict], list[str]]:
+    import cv2
+
+    scale = 150 / 72
+    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+    image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+        pixmap.height, pixmap.width, pixmap.n
+    )
+    rgb = image[:, :, :3]
+    findings: list[dict] = []
+    failures: list[dict] = []
+    detectors: list[str] = []
+
+    visual_detectors = (
+        ("opencv-face", lambda: _face_findings(cv2, page, page_number, rgb, scale)),
+        (
+            "opencv-seal-signature",
+            lambda: _seal_signature_findings(cv2, page, page_number, rgb, scale),
+        ),
+        ("opencv-qr", lambda: _qr_findings(cv2, page, page_number, rgb, scale)),
+        (
+            "opencv-barcode",
+            lambda: _barcode_findings(cv2, page, page_number, rgb, scale),
+        ),
+    )
+    for detector, run in visual_detectors:
+        try:
+            findings.extend(run())
+            detectors.append(detector)
+        except Exception as error:
+            failures.append(_detector_failure(page_number, detector, error))
+    return findings, failures, detectors
+
+
+def _face_findings(cv2, page, page_number: int, rgb, scale: float) -> list[dict]:
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    cascade_path = str(Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml")
+    cascade = cv2.CascadeClassifier(cascade_path)
+    if cascade.empty():
+        raise RedactionError("Local face detector could not be loaded")
+    findings: list[dict] = []
+    for x, y, width, height in cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(28, 28),
+    ):
+        findings.append(
+            _visual_finding(
+                page,
+                page_number,
+                "FACE",
+                x,
+                y,
+                width,
+                height,
+                scale,
+                0.86,
+            )
+        )
+    return findings
+
+
+def _seal_signature_findings(
+    cv2,
+    page,
+    page_number: int,
+    rgb,
+    scale: float,
+) -> list[dict]:
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    blue = cv2.inRange(hsv, np.array([85, 45, 35]), np.array([140, 255, 255]))
+    red = cv2.inRange(hsv, np.array([0, 55, 40]), np.array([12, 255, 255])) | cv2.inRange(
+        hsv, np.array([165, 55, 40]), np.array([179, 255, 255])
+    )
+    mask = cv2.morphologyEx(blue | red, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    findings: list[dict] = []
+    for contour in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+        x, y, width, height = cv2.boundingRect(contour)
+        area = width * height
+        if area < 900 or width < 25 or height < 12:
+            continue
+        ratio = width / max(height, 1)
+        category = "SEAL" if 0.65 <= ratio <= 1.55 and area >= 1800 else "SIGNATURE"
+        findings.append(
+            _visual_finding(page, page_number, category, x, y, width, height, scale, 0.7)
+        )
+    return findings
+
+
+def _qr_findings(cv2, page, page_number: int, rgb, scale: float) -> list[dict]:
+    detector = cv2.QRCodeDetector()
+    detected, points = detector.detectMulti(rgb)
+    if not detected or points is None:
         return []
+    return [
+        _polygon_visual_finding(
+            page,
+            page_number,
+            "QR_CODE",
+            polygon,
+            scale,
+            confidence=0.95,
+        )
+        for polygon in points
+    ]
+
+
+def _barcode_findings(cv2, page, page_number: int, rgb, scale: float) -> list[dict]:
+    detector_class = getattr(cv2, "barcode_BarcodeDetector", None)
+    if detector_class is None:
+        raise RedactionError("Local barcode detector is unavailable")
+    detected, points = detector_class().detectMulti(rgb)
+    if not detected or points is None:
+        return []
+    return [
+        _polygon_visual_finding(
+            page,
+            page_number,
+            "BARCODE",
+            polygon,
+            scale,
+            confidence=0.9,
+        )
+        for polygon in points
+    ]
+
+
+def _polygon_visual_finding(
+    page,
+    page_number: int,
+    category: str,
+    points,
+    scale: float,
+    confidence: float,
+) -> dict:
+    polygon = np.asarray(points, dtype=float).reshape(-1, 2)
+    if len(polygon) < 4 or not np.isfinite(polygon).all():
+        raise RedactionError(f"{category} detector returned invalid coordinates")
+    x0, y0 = polygon.min(axis=0)
+    x1, y1 = polygon.max(axis=0)
+    padding = 3
+    return _visual_finding(
+        page,
+        page_number,
+        category,
+        max(0, x0 - padding),
+        max(0, y0 - padding),
+        x1 - x0 + padding * 2,
+        y1 - y0 + padding * 2,
+        scale,
+        confidence,
+    )
 
 
 def _visual_finding(page, page_number, category, x, y, width, height, scale, confidence):
     rect = pymupdf.Rect(x / scale, y / scale, (x + width) / scale, (y + height) / scale)
-    return _finding(page_number, "visual", category, "", rect, page.rect, confidence)
+    return _finding(
+        page_number,
+        "visual",
+        category,
+        "",
+        rect,
+        page.rect,
+        confidence,
+        source="visual",
+        review_required=True,
+    )
 
 
-def _finding(page_number, group, category, text, rect, page_rect, confidence):
-    return {
+def _finding(
+    page_number,
+    group,
+    category,
+    text,
+    rect,
+    page_rect,
+    confidence,
+    *,
+    source="manual",
+    recognizer="",
+    review_required=False,
+):
+    finding = {
         "id": "",
         "page": page_number,
         "group": group,
@@ -654,25 +1111,19 @@ def _finding(page_number, group, category, text, rect, page_rect, confidence):
             "height": round(rect.height / page_rect.height * 100, 3),
         },
     }
+    finding["source"] = source
+    finding["review_required"] = bool(review_required)
+    if recognizer:
+        finding["recognizer"] = recognizer
+    return finding
 
 
 def _deduplicate(findings: list[dict]) -> list[dict]:
+    from app.services.privacy_detection import PRIVACY_TAXONOMY
+
     result: list[dict] = []
     priority = {
-        "IIN": 100,
-        "BIN": 100,
-        "IIN_OR_BIN": 95,
-        "EMAIL": 90,
-        "PHONE": 90,
-        "IBAN": 90,
-        "ADDRESS": 85,
-        "AMOUNT": 80,
-        "DOC_ID": 75,
-        "ORG": 70,
-        "PERSON": 60,
-        "FACE": 55,
-        "SEAL": 55,
-        "SIGNATURE": 55,
+        category: spec.priority for category, spec in PRIVACY_TAXONOMY.items()
     }
     ordered = sorted(
         findings,
@@ -714,6 +1165,9 @@ def _replacement_map(findings: list[dict]) -> dict[str, str]:
         "ORG": "Организация",
         "IIN": "ИИН скрыт",
         "IIN_OR_BIN": "ИИН/БИН скрыт",
+        "QR_CODE": "QR-код скрыт",
+        "BARCODE": "Штрихкод скрыт",
+        "PAYMENT_CARD": "Карта скрыта",
         "EMAIL": "Email скрыт",
         "PHONE": "Телефон скрыт",
         "IBAN": "Счёт скрыт",
@@ -723,6 +1177,8 @@ def _replacement_map(findings: list[dict]) -> dict[str, str]:
         "FACE": "Лицо скрыто",
         "SEAL": "Печать скрыта",
         "SIGNATURE": "Подпись скрыта",
+        "LOCATION": "Место скрыто",
+        "DATE": "Дата скрыта",
     }
     for finding in findings:
         category = finding["category"]
@@ -737,7 +1193,11 @@ def _replacement_map(findings: list[dict]) -> dict[str, str]:
 
 def _alpha(index: int) -> str:
     letters = string.ascii_uppercase
-    return letters[(index - 1) % len(letters)]
+    result = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, len(letters))
+        result = letters[remainder] + result
+    return result
 
 
 def _insert_replacement(page, rect, text: str) -> None:

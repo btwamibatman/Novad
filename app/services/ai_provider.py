@@ -1,13 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Protocol
 
 from app.core.config import settings
 
 
 class AIProviderError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | str | None = None,
+        retryable: bool = False,
+        retry_after_seconds: int | None = None,
+        provider_detail: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+        self.provider_detail = provider_detail
 
 
 class AIProviderNotConfigured(AIProviderError):
@@ -24,6 +39,24 @@ class AIImage:
 class AIGenerationResult:
     text: str
     model: str
+    usage: dict | None = None
+    request_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AIDocument:
+    path: Path
+    mime_type: str = "application/pdf"
+    display_name: str = "protected-document.pdf"
+
+
+@dataclass(frozen=True)
+class AIRemoteDocument:
+    name: str
+    uri: str
+    mime_type: str
+    state: str
+    expires_at: datetime | None = None
 
 
 class DocumentAIProvider(Protocol):
@@ -43,6 +76,23 @@ class DocumentAIProvider(Protocol):
         *,
         max_output_tokens: int,
         temperature: float = 0.2,
+        timeout_seconds: int | None = None,
+    ) -> AIGenerationResult: ...
+
+    def upload_document(self, document: AIDocument) -> AIRemoteDocument: ...
+
+    def get_document(self, name: str) -> AIRemoteDocument: ...
+
+    def delete_document(self, name: str) -> None: ...
+
+    def generate_document(
+        self,
+        prompt: str,
+        document: AIDocument | AIRemoteDocument,
+        *,
+        max_output_tokens: int,
+        response_schema: type | dict | None = None,
+        temperature: float = 0.1,
         timeout_seconds: int | None = None,
     ) -> AIGenerationResult: ...
 

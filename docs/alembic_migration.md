@@ -15,6 +15,10 @@ fields, extraction-quality metadata, analysis progress, chunk confidence/table
 metadata, privacy summary metadata and the DB-backed `analysis_jobs` table. Existing
 documents remain readable with safe defaults.
 
+Revisions `20260820_0009` through `20260820_0011` add protected document artifacts,
+persistent protected-PDF AI jobs and atomic enqueue deduplication. Apply them before
+starting the updated API/worker.
+
 ## Create a new migration
 
 ```bash

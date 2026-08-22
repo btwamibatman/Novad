@@ -201,6 +201,27 @@ All tool operations are user-scoped and processed by the local worker.
 - `POST /api/tools/word-to-pdf` — upload DOCX, DOC, or ODT and queue PDF conversion.
 - `POST /api/tools/pdf-to-word` — queue editable DOCX creation with OCR fallback.
 - `POST /api/tools/redaction/preview` — detect selected data categories and create a review job.
-- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed or manually drawn percentage-based `areas` as permanent redaction or pseudonymized labels; legacy `finding_ids` are also accepted.
+- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed or manually drawn percentage-based `areas` as permanent redaction or pseudonymized labels; legacy `finding_ids` are also accepted. The result is automatically flattened and verified.
 - `GET /api/tools/jobs/{job_id}/pages/{page_number}` — render a local review preview.
 - `GET /api/tools/jobs/{job_id}/download` — download a completed derivative without replacing the original.
+- `GET /api/tools/artifacts` — list protected PDF artifacts for the current user.
+- `GET /api/tools/artifacts/{artifact_id}` — return policy, coverage, integrity hashes, and verification status.
+- `GET /api/tools/artifacts/{artifact_id}/pages/{page_number}` — preview a protected artifact page.
+- `GET /api/tools/artifacts/{artifact_id}/download` — download the protected copy.
+- `DELETE /api/tools/artifacts/{artifact_id}` — revoke linked remote AI files and delete the artifact; active AI jobs must be cancelled first.
+
+Protected artifacts are fail-closed. Only status `ready_for_ai` passes the AI gate;
+`needs_review`, `verifying`, `failed`, residual PII, incomplete detector coverage, or a
+SHA-256 lineage mismatch are rejected.
+
+## Protected PDF AI analysis
+
+- `GET /api/ai/provider-info` — disclose provider, model, service tier, retention limit, and the verified-artifact requirement.
+- `GET /api/ai/jobs` and `GET /api/ai/jobs/{job_id}` — list or resume persistent analysis jobs.
+- `POST /api/ai/jobs` — queue `summary`, `content_review`, or `layout_review` for a `ready_for_ai` artifact. Both external-processing consent flags are required.
+- `POST /api/ai/jobs/{job_id}/cancel` — cancel pending/retrying work and cooperatively stop a running worker.
+- `DELETE /api/ai/jobs/{job_id}/remote-file` — explicitly delete the provider copy and clear all shared local references.
+
+The job sends the protected PDF directly to the configured provider. A local ephemeral
+OCR index is generated from the same image-only artifact to validate page numbers and
+text evidence; it is not uploaded separately or stored in the AI job.

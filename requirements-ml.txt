@@ -1,3 +1,4 @@
 # Install requirements-torch-cpu.txt first so Stanza cannot pull a CUDA wheel.
-numpy==2.5.1
+numpy==2.4.2
 stanza==1.14.0
+presidio-analyzer==2.2.364

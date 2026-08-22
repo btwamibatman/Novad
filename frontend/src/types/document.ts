@@ -89,7 +89,7 @@ export interface AIChatResponse {
 export type ToolJobStatus = 'pending' | 'running' | 'review' | 'completed' | 'failed'
 export type CompressionMode = 'low' | 'recommended' | 'extreme'
 export type RedactionMode = 'black' | 'pseudonymize'
-export type RedactionCategory = 'personal' | 'financial' | 'visual' | 'service'
+export type RedactionCategory = 'personal' | 'financial' | 'visual' | 'service' | 'context'
 
 export interface RedactionFinding {
   id: string
@@ -122,9 +122,169 @@ export interface ToolJobRead {
   result_filename: string | null
   result_content_type: string | null
   result_size_bytes: number | null
+  result_artifact_id: number | null
   result_meta: Record<string, unknown>
   error_message: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
+}
+
+export type DocumentArtifactStatus = 'verifying' | 'ready_for_ai' | 'needs_review' | 'failed'
+
+export interface ArtifactCoverageReport {
+  page_count?: number
+  checked_pages?: number[]
+  unchecked_pages?: number[]
+  native_text_pages?: number[]
+  image_only_pages?: number[]
+  verification_completed?: boolean
+  [key: string]: unknown
+}
+
+export interface ArtifactVerificationReport {
+  passed?: boolean
+  risks?: string[]
+  source_hash_verified?: boolean
+  artifact_hash_verified?: boolean
+  selected_text_residual_count?: number
+  remaining_finding_count?: number
+  [key: string]: unknown
+}
+
+export interface DocumentArtifactRead {
+  id: number
+  source_document_id: number
+  kind: string
+  status: DocumentArtifactStatus
+  filename: string
+  content_type: string
+  size_bytes: number
+  source_sha256: string
+  artifact_sha256: string
+  privacy_policy: DocumentPrivacyPolicy
+  policy_version: string
+  detector_version: string
+  coverage_report: ArtifactCoverageReport
+  verification_report: ArtifactVerificationReport
+  error_message: string | null
+  created_at: string
+  updated_at: string
+  verified_at: string | null
+}
+
+export interface DocumentPrivacyPolicy {
+  categories: RedactionCategory[]
+  redaction_mode: RedactionMode | null
+  selected_finding_count: number
+  manual_confirmation: boolean
+  flattened: boolean
+  selectable_text: boolean
+  render_dpi: number | null
+  image_format: string | null
+  jpeg_quality: number | null
+}
+
+export type AIAnalysisTask = 'summary' | 'content_review' | 'layout_review'
+export type AIAnalysisJobStatus =
+  | 'pending'
+  | 'running'
+  | 'retry_scheduled'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+export type AIFileRetention = 'delete_after_analysis' | 'retain_48h'
+export type RemoteCleanupStatus =
+  | 'not_applicable'
+  | 'pending'
+  | 'retained'
+  | 'deleted'
+  | 'failed'
+export type AIAnalysisFindingCategory =
+  | 'grammar'
+  | 'style'
+  | 'logic'
+  | 'consistency'
+  | 'ocr'
+  | 'layout'
+  | 'accessibility'
+  | 'other'
+export type AIAnalysisFindingSeverity = 'critical' | 'high' | 'medium' | 'low'
+export type AIAnalysisEvidenceBasis = 'native_text' | 'ocr' | 'vision'
+
+export interface AIAnalysisCoverage {
+  pages_reviewed: number[]
+  complete: boolean
+  limitations: string[]
+}
+
+export interface AIAnalysisKeyPoint {
+  text: string
+  page: number | null
+  evidence: string
+  evidence_verified: boolean
+}
+
+export interface AIAnalysisFinding {
+  category: AIAnalysisFindingCategory
+  severity: AIAnalysisFindingSeverity
+  page: number
+  evidence: string
+  explanation: string
+  suggestion: string
+  confidence: number
+  basis: AIAnalysisEvidenceBasis
+  requires_human_review: boolean
+  evidence_verified: boolean
+}
+
+export interface ProtectedDocumentAnalysis {
+  task: AIAnalysisTask
+  overview: string
+  verdict: string
+  key_points: AIAnalysisKeyPoint[]
+  findings: AIAnalysisFinding[]
+  coverage: AIAnalysisCoverage
+}
+
+export interface AIAnalysisJobRead {
+  id: number
+  artifact_id: number
+  task: AIAnalysisTask
+  status: AIAnalysisJobStatus
+  stage: string
+  progress: number
+  worker_active: boolean
+  provider: string
+  model: string | null
+  retention: AIFileRetention
+  result: Partial<ProtectedDocumentAnalysis>
+  usage: Record<string, unknown>
+  attempts: number
+  not_before: string | null
+  error_code: string | null
+  public_error: string | null
+  remote_file_present: boolean
+  remote_cleanup_status: RemoteCleanupStatus
+  remote_cleanup_error: string | null
+  provider_file_expires_at: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface AIAnalysisJobCreate {
+  artifact_id: number
+  task: AIAnalysisTask
+  retention: AIFileRetention
+  consent_to_external_processing: boolean
+  acknowledge_provider_data_terms: boolean
+}
+
+export interface AIProviderInfo {
+  provider: string
+  model: string
+  service_tier: 'unpaid' | 'paid'
+  max_remote_retention_hours: number
+  requires_verified_artifact: boolean
 }

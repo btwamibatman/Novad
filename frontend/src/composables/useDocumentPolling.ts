@@ -2,7 +2,7 @@ import { onScopeDispose, watch } from 'vue'
 
 import { useDocumentsStore } from '@/stores/documents'
 
-const POLL_INTERVAL_MS = 1500
+const POLL_INTERVAL_MS = 3000
 
 export function useDocumentPolling(onError: (error: unknown) => void) {
   const documentsStore = useDocumentsStore()

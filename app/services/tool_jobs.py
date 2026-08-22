@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import create_session
 from app.models._utils import utc_now
 from app.models.tool_job import ToolJob
-from app.services import document_redaction, document_tools
+from app.services import document_artifacts, document_redaction, document_tools
 
 SessionFactory = Callable[[], Session]
 
@@ -89,7 +89,7 @@ def process_tool_job(
                     meta,
                 )
             elif job.kind == "redaction":
-                _process_redaction(job, source, update_progress)
+                _process_redaction(db, job, source, update_progress)
             else:
                 raise document_tools.DocumentToolError("Unknown tool job")
             db.commit()
@@ -101,7 +101,7 @@ def process_tool_job(
             db.commit()
 
 
-def _process_redaction(job: ToolJob, source: Path, progress) -> None:
+def _process_redaction(db: Session, job: ToolJob, source: Path, progress) -> None:
     operation = job.options.get("operation", "preview")
     if operation == "preview":
         findings, meta = document_redaction.detect_redactions(
@@ -117,21 +117,85 @@ def _process_redaction(job: ToolJob, source: Path, progress) -> None:
         job.finished_at = utc_now()
         return
     destination = _result_path(job, ".pdf", suffix="-protected")
+    preview_meta = dict(job.result_meta)
     selected_areas = job.options.get("selected_redaction_areas", [])
     findings = (
         document_redaction.findings_from_areas(source, job.findings, selected_areas)
         if selected_areas
         else job.findings
     )
-    meta = document_redaction.apply_redactions(
-        source,
-        destination,
-        findings,
-        set(job.options.get("selected_finding_ids", [])),
-        str(job.options.get("redaction_mode", "black")),
-        progress,
-    )
-    _complete(job, destination, "application/pdf", meta)
+    categories = set(job.options.get("categories", ["personal", "financial"]))
+    redaction_mode = str(job.options.get("redaction_mode", "black"))
+    selected_ids = set(job.options.get("selected_finding_ids", []))
+    selected_findings = [
+        finding for finding in findings if finding.get("id") in selected_ids
+    ]
+
+    def redaction_progress(percent: int, stage: str) -> None:
+        progress(min(85, int(max(0, min(percent, 100)) * 0.85)), stage)
+
+    try:
+        meta = document_redaction.apply_redactions(
+            source,
+            destination,
+            findings,
+            selected_ids,
+            redaction_mode,
+            redaction_progress,
+        )
+        progress(86, "verifying")
+        artifact = document_artifacts.register_protected_artifact(
+            db,
+            job=job,
+            source=source,
+            result=destination,
+            categories=categories,
+            redaction_mode=redaction_mode,
+            selected_finding_count=len(selected_findings),
+            preview_meta=preview_meta,
+            generation_meta=meta,
+        )
+        job.result_artifact_id = artifact.id
+        job.result_path = str(destination.resolve())
+        job.result_filename = destination.name
+        job.result_content_type = "application/pdf"
+        job.result_size_bytes = destination.stat().st_size
+        job.findings = document_artifacts.minimize_findings(job.findings)
+        db.commit()
+
+        try:
+            artifact_status, coverage, verification = (
+                document_artifacts.verify_protected_artifact(
+                    artifact,
+                    selected_findings=selected_findings,
+                    progress=progress,
+                )
+            )
+            document_artifacts.complete_artifact_verification(
+                artifact,
+                status=artifact_status,
+                coverage_report=coverage,
+                verification_report=verification,
+            )
+        except Exception as error:
+            document_artifacts.fail_artifact_verification(artifact, error)
+            db.commit()
+            raise
+
+        _complete(
+            job,
+            destination,
+            "application/pdf",
+            {
+                **meta,
+                "artifact_status": artifact.status,
+                "verification": artifact.verification_report,
+            },
+        )
+    except Exception:
+        if job.result_artifact_id is None:
+            destination.unlink(missing_ok=True)
+        raise
 
 
 def _complete(job: ToolJob, destination: Path, content_type: str, meta: dict) -> None:

@@ -25,3 +25,5 @@ app/web/dist/
 Thumbs.db
 notes.md
 /storage
+documents.db
+.storage

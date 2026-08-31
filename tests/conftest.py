@@ -1,5 +1,5 @@
-from collections.abc import Generator
 import shutil
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,10 +12,10 @@ from app.core.config import settings
 from app.core.database import Base, get_db
 from app.crud.user import create_user
 from app.main import app
+from app.services.analysis_jobs import run_next_analysis_job
 from app.services.password_hashing import hash_password
 from app.services.rate_limit import _buckets
-from app.services.analysis_jobs import run_next_analysis_job
-from tests.pdf_helpers import make_pdf_with_text
+from tests.helpers.pdf import make_pdf_with_text
 
 TEST_DATABASE_URL = "sqlite://"
 

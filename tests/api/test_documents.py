@@ -10,11 +10,14 @@ from app.services import text_analysis
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import layout_review as ai_layout_review
 from app.services.file_storage import resolve_stored_path
-from tests.pdf_helpers import (
+from tests.helpers.pdf import (
     make_pdf_with_text,
     make_pdf_with_text_and_blank_pages,
     make_pdf_without_text,
 )
+
+
+# Upload, validation, listing, and ownership
 
 
 def upload_pdf(client, filename: str = "sample.pdf", text: str | None = None):
@@ -197,6 +200,9 @@ def test_upload_rejects_session_storage_quota(client, monkeypatch):
     assert response.json()["detail"]["message"] == "Session storage quota exceeded"
 
 
+# Analysis job lifecycle
+
+
 def test_analyze_pdf_document(client, pdf_document_id, analysis_runner):
     response = client.post(f"/api/documents/{pdf_document_id}/analyze")
 
@@ -286,6 +292,9 @@ def test_failed_analysis_job_can_be_retried(
     assert retry.status_code == 202
     assert calls == 2
     assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "processed"
+
+
+# Summaries and document questions
 
 
 def test_summarize_requires_processed_document(client, pdf_document_id):
@@ -459,6 +468,9 @@ def test_ask_rate_limit_returns_retry_after(
     assert response.headers["Retry-After"]
 
 
+# Text extraction and OCR fallback
+
+
 def test_analyze_pdf_with_text_layer(client, analysis_runner):
     pdf_bytes = make_pdf_with_text("This PDF contains extractable English text for analysis.")
     upload = client.post(
@@ -623,6 +635,9 @@ def test_ocr_language_missing_error_is_user_readable(monkeypatch):
     assert message == "OCR failed: configured language data is missing (rus+kaz+eng)"
 
 
+# Content review
+
+
 def test_content_review_requires_processed_document(client, pdf_document_id):
     response = client.post(
         f"/api/documents/{pdf_document_id}/content-review",
@@ -694,6 +709,9 @@ def test_content_review_reports_synchronous_size_limit(
     assert stored["content_review_error"] == "Use quick review"
 
 
+# Layout review and external image consent
+
+
 def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, monkeypatch):
     monkeypatch.setattr(settings, "gemini_service_tier", "paid")
     def fake_review(path: Path):
@@ -758,6 +776,9 @@ def test_layout_review_requires_explicit_external_image_consent(
         f"/api/documents/{pdf_document_id}/layout-review"
     )
     assert missing_body.status_code == 400
+
+
+# Deletion
 
 
 def test_delete_document_removes_database_record_and_file(client):

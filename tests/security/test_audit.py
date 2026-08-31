@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.main import app
 from app.services.file_storage import remove_stored_file
 from app.services.pii_masking import PIIMaskingSession, RegexPIIRecognizer
-from tests.pdf_helpers import make_pdf_with_text
+from tests.helpers.pdf import make_pdf_with_text
 
 
 def test_upload_strips_path_segments_and_accepts_unicode_filename(client):

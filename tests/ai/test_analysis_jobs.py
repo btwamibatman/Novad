@@ -22,7 +22,7 @@ from app.services.ai.provider import (
 from app.services.documents.artifacts import POLICY_VERSION, sha256_file
 from app.services.privacy_detection import PRIVACY_ENGINE_VERSION
 from tests.conftest import TestingSessionLocal
-from tests.pdf_helpers import make_pdf_with_text
+from tests.helpers.pdf import make_pdf_with_text
 
 
 class FakeDocumentProvider:
@@ -153,6 +153,9 @@ def _enqueue(client, artifact_id: int, **overrides):
     return client.post("/api/ai/jobs", json=payload)
 
 
+# Provider policy and enqueue validation
+
+
 def test_provider_info_exposes_policy_without_credentials(client):
     response = client.get("/api/ai/provider-info")
 
@@ -177,6 +180,9 @@ def test_ai_job_requires_consent_and_verified_artifact(client, pdf_document_id):
 
     unready_id, _, _ = _create_artifact(pdf_document_id, status="needs_review")
     assert _enqueue(client, unready_id).status_code == 409
+
+
+# Deduplication and execution
 
 
 def test_identical_enqueue_is_idempotent_across_request_sessions(
@@ -347,6 +353,9 @@ def test_failed_job_releases_its_dedupe_key(
     with TestingSessionLocal() as db:
         assert db.get(AIAnalysisJob, first_id).dedupe_key is None
         assert db.get(AIAnalysisJob, second_id).dedupe_key is not None
+
+
+# Retained provider-file lifecycle
 
 
 def test_retained_remote_pdf_is_reused_and_revoked_for_all_linked_jobs(
@@ -580,6 +589,9 @@ def test_deleting_source_document_revokes_retained_provider_file(
     assert provider.deleted == ["files/protected-1"]
     assert not protected_path.exists()
     assert client.get(f"/api/ai/jobs/{job_id}").status_code == 404
+
+
+# Worker recovery, cancellation, and cleanup
 
 
 def test_worker_reclaims_stale_running_job(client, pdf_document_id, monkeypatch):

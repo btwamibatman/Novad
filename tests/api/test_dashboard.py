@@ -1,4 +1,4 @@
-from tests.pdf_helpers import make_pdf_with_text
+from tests.helpers.pdf import make_pdf_with_text
 
 
 def test_dashboard_summary_returns_document_metrics(

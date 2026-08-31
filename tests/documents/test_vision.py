@@ -7,7 +7,7 @@ from app.services.documents import vision as document_vision
 from app.services.ai.provider import AIGenerationResult
 from app.services.ai import layout_review as ai_layout_review
 from app.services.documents.vision import RenderedDocument, RenderedPage
-from tests.pdf_helpers import make_pdf_with_text
+from tests.helpers.pdf import make_pdf_with_text
 
 
 def test_select_pages_for_layout_review_is_even_and_includes_edges():

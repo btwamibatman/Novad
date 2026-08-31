@@ -21,6 +21,9 @@ from app.services.documents.redaction import (
 )
 
 
+# Redaction defaults and text detection
+
+
 def test_pseudonym_labels_remain_distinct_after_twenty_six_values():
     assert [_alpha(index) for index in (1, 26, 27, 28, 52, 53)] == [
         "A",
@@ -195,6 +198,9 @@ def test_amount_pattern_matches_currency_symbols_without_word_boundary():
     ]
 
 
+# OCR coverage
+
+
 def test_mixed_page_runs_ocr_even_when_native_footer_exists(tmp_path, monkeypatch):
     source = tmp_path / "mixed.pdf"
     image_document = pymupdf.open()
@@ -317,6 +323,9 @@ def test_empty_ocr_on_non_empty_page_is_not_treated_as_complete(tmp_path, monkey
         and "no readable text" in item["message"]
         for item in meta["detector_failures"]
     )
+
+
+# PDF sanitization and flattening
 
 
 def test_apply_removes_annotations_widgets_and_bookmarks(tmp_path):
@@ -452,6 +461,9 @@ def test_apply_fails_closed_when_flattened_pdf_cannot_fit_ai_limit(
         )
 
     assert not destination.exists()
+
+
+# Visual privacy detection
 
 
 def test_visual_detection_finds_qr_code_and_marks_it_for_review():

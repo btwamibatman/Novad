@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     storage_dir: str = "storage/uploads"
     max_upload_size_bytes: int = 50 * 1024 * 1024
     max_request_size_bytes: int = 55 * 1024 * 1024
-    max_pdf_pages: int = 100
+    max_pdf_pages: int = 40
     session_cookie_name: str = "document_session"
-    session_ttl_minutes: int = 120
+    session_ttl_minutes: int = 15
     session_cleanup_interval_seconds: int = 900
     session_storage_quota_bytes: int = 500 * 1024 * 1024
     ai_provider: str = "gemini"

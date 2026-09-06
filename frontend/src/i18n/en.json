@@ -380,8 +380,6 @@
   "tools.conversion.ocr_help": "Text recognition starts automatically for scanned pages.",
   "tools.conversion.to_pdf": "Convert to PDF",
   "tools.conversion.to_word": "Create Word beta",
-  "tools.jobs": "Recent tasks",
-  "tools.no_jobs": "Processing results will appear here.",
   "tools.kind.compression": "PDF compression",
   "tools.kind.word_to_pdf": "Word → PDF",
   "tools.kind.pdf_to_word": "PDF → Word beta",

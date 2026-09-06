@@ -380,8 +380,6 @@
   "tools.conversion.ocr_help": "Для сканов автоматически запускается распознавание текста.",
   "tools.conversion.to_pdf": "Преобразовать в PDF",
   "tools.conversion.to_word": "Создать Word beta",
-  "tools.jobs": "Последние задачи",
-  "tools.no_jobs": "Здесь появятся результаты обработки.",
   "tools.kind.compression": "Сжатие PDF",
   "tools.kind.word_to_pdf": "Word → PDF",
   "tools.kind.pdf_to_word": "PDF → Word beta",

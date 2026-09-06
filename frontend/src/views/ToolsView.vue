@@ -620,19 +620,5 @@ onBeforeUnmount(() => {
       @deleted="artifactDeleted"
     />
 
-    <section class="jobs-panel panel">
-      <div class="panel-head"><h3 class="panel-title">{{ t('tools.jobs') }}</h3></div>
-      <div class="job-list panel-body">
-        <p v-if="!jobs.length" class="compact-empty">{{ t('tools.no_jobs') }}</p>
-        <article v-for="job in jobs" v-else :key="job.id" class="job-row">
-          <div><strong>{{ job.source_filename }}</strong><span>{{ t(`tools.kind.${job.kind}`) }}</span></div>
-          <div v-if="['pending', 'running'].includes(job.status)" class="job-progress"><progress :value="job.progress" max="100"></progress><span>{{ t(`tools.stage.${job.stage}`, job.stage) }} · {{ job.progress }}%</span></div>
-          <span v-else class="badge" :class="job.status === 'completed' ? 'processed' : job.status === 'failed' ? 'failed' : 'neutral'">{{ t(`tools.status.${job.status}`) }}</span>
-          <span v-if="job.kind === 'compression' && job.status === 'completed'" class="saving">−{{ job.result_meta.savings_percent ?? 0 }}%</span>
-          <a v-if="job.status === 'completed'" class="button small" :href="toolsApi.downloadUrl(job.id)">{{ t('documents.download') }}</a>
-          <span v-if="job.error_message" class="job-error">{{ job.error_message }}</span>
-        </article>
-      </div>
-    </section>
   </main>
 </template>

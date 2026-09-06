@@ -979,26 +979,6 @@ tbody tr[data-document-id]:hover {
   margin-left: auto;
 }
 
-.job-list {
-  display: grid;
-  gap: 8px;
-}
-
-.job-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto auto;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--border-soft);
-  padding: 9px 0;
-}
-
-.job-row > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-
-.job-row > div:first-child span,
 .job-progress span {
   color: var(--text-soft);
   font-size: 12px;
@@ -1012,17 +992,6 @@ tbody tr[data-document-id]:hover {
 .job-progress progress {
   width: 100%;
   accent-color: var(--accent);
-}
-
-.saving {
-  color: var(--success);
-  font-weight: 700;
-}
-
-.job-error {
-  grid-column: 1 / -1;
-  color: var(--danger);
-  font-size: 12px;
 }
 
 @media (max-width: 900px) {
@@ -1039,9 +1008,6 @@ tbody tr[data-document-id]:hover {
     grid-template-columns: 1fr;
   }
 
-  .job-row {
-    grid-template-columns: 1fr auto;
-  }
 }
 
 .badge.analyzing {

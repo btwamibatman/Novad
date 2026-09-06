@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import DocumentTableRow from './DocumentTableRow.vue'
+import DocumentUpload from './DocumentUpload.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
 import { useDocumentsStore } from '@/stores/documents'
@@ -10,6 +12,22 @@ const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
+const uploadOpen = ref(false)
+const uploadTrigger = ref<HTMLButtonElement | null>(null)
+
+async function closeUpload(): Promise<void> {
+  uploadOpen.value = false
+  await nextTick()
+  uploadTrigger.value?.focus()
+}
+
+async function reload(): Promise<void> {
+  try {
+    await documentsStore.load()
+  } catch (error) {
+    handle(error)
+  }
+}
 
 async function analyze(documentId: number): Promise<void> {
   try {
@@ -43,10 +61,10 @@ async function remove(documentId: number): Promise<void> {
 </script>
 
 <template>
-  <article class="panel">
+  <article class="panel document-library" :aria-label="t('documents.title')" :aria-busy="documentsStore.loading">
     <div class="panel-head">
       <h2 class="panel-title">{{ t('documents.title') }}</h2>
-      <span class="muted">
+      <span class="muted" role="status">
         {{
           documentsStore.loading
             ? t('common.loading')
@@ -55,7 +73,7 @@ async function remove(documentId: number): Promise<void> {
       </span>
     </div>
     <div class="panel-body">
-      <div class="filters">
+      <div class="library-toolbar">
         <input
           v-model="documentsStore.search"
           class="field"
@@ -73,31 +91,53 @@ async function remove(documentId: number): Promise<void> {
           <option value="processed">{{ t('status.processed') }}</option>
           <option value="failed">{{ t('status.failed') }}</option>
         </select>
+        <button
+          ref="uploadTrigger"
+          class="button primary"
+          type="button"
+          :aria-expanded="uploadOpen"
+          aria-controls="document-upload"
+          @click="uploadOpen = !uploadOpen"
+        >
+          <span aria-hidden="true">＋</span> {{ t('upload.title') }}
+        </button>
       </div>
-      <div class="table-wrap">
-        <table>
+      <DocumentUpload v-if="uploadOpen" id="document-upload" @close="closeUpload" />
+      <div v-if="documentsStore.loadFailed" class="library-error" role="alert">
+        <span>{{ t('documents.load_failed') }}</span>
+        <button class="button small" type="button" :disabled="documentsStore.loading" @click="reload">{{ t('actions.refresh') }}</button>
+      </div>
+      <div class="table-wrap" role="region" :aria-label="t('documents.title')" tabindex="0">
+        <table class="documents-table">
+          <colgroup><col class="file-column" /><col class="status-column" /><col class="size-column" /><col class="date-column" /><col class="action-column" /></colgroup>
           <thead>
             <tr>
-              <th>{{ t('documents.file') }}</th>
-              <th>{{ t('documents.type') }}</th>
-              <th>{{ t('documents.status') }}</th>
-              <th>{{ t('documents.size') }}</th>
-              <th>{{ t('documents.language') }}</th>
-              <th>{{ t('documents.words') }}</th>
-              <th>AI</th>
-              <th>{{ t('documents.actions') }}</th>
+              <th scope="col">{{ t('documents.file') }}</th>
+              <th scope="col">{{ t('documents.status') }}</th>
+              <th scope="col">{{ t('documents.size') }}</th>
+              <th scope="col">{{ t('documents.added') }}</th>
+              <th scope="col">{{ t('documents.actions') }}</th>
             </tr>
           </thead>
           <tbody>
             <template v-if="documentsStore.loading && !documentsStore.documents.length">
               <tr v-for="index in 4" :key="index">
-                <td colspan="8">
+                <td colspan="5">
                   <div class="skeleton" style="height: 28px; border-radius: 6px"></div>
                 </td>
               </tr>
             </template>
-            <tr v-else-if="!documentsStore.filteredDocuments.length">
-              <td colspan="8" class="muted">{{ t('documents.empty') }}</td>
+            <tr v-else-if="!documentsStore.filteredDocuments.length && !documentsStore.loadFailed">
+              <td colspan="5" class="library-empty">
+                <template v-if="documentsStore.documents.length">
+                  <p>{{ t('documents.empty') }}</p>
+                  <button class="button small" type="button" @click="documentsStore.search = ''; documentsStore.statusFilter = 'all'">{{ t('documents.clear_filters') }}</button>
+                </template>
+                <template v-else>
+                  <strong>{{ t('documents.empty_title') }}</strong>
+                  <p>{{ t('documents.empty_help') }}</p>
+                </template>
+              </td>
             </tr>
             <DocumentTableRow
               v-for="document in documentsStore.filteredDocuments"
@@ -114,3 +154,23 @@ async function remove(documentId: number): Promise<void> {
     </div>
   </article>
 </template>
+
+<style scoped>
+.document-library .panel-head { background: transparent; border: 0; padding-bottom: 0; }
+.document-library .panel-title { font-size: 22px; }
+.library-toolbar { display: grid; grid-template-columns: minmax(160px, 1fr) 190px auto; gap: 12px; margin-bottom: 20px; }
+.documents-table { table-layout: fixed; min-width: 920px; }
+.file-column { width: auto; }
+.status-column { width: 120px; }
+.size-column { width: 85px; }
+.date-column { width: 125px; }
+.action-column { width: 200px; }
+.library-empty { text-align: center; height: 200px; color: var(--text-soft); }
+.library-empty strong { color: var(--text); font-size: 18px; }
+.library-empty p { margin: 10px 0; }
+.library-error { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--danger); margin-bottom: 16px; }
+@media (max-width: 600px) {
+  .library-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .library-toolbar .field { grid-column: 1 / -1; }
+}
+</style>

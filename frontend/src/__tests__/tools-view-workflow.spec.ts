@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   loadDocuments: vi.fn(),
   handleError: vi.fn(),
   showToast: vi.fn(),
+  redactionPreview: vi.fn(),
+  applyRedaction: vi.fn(),
+  wordToPdf: vi.fn(),
   routeQuery: {} as Record<string, string | undefined>,
 }))
 
@@ -25,6 +28,9 @@ vi.mock('@/api/tools', () => ({
   toolsApi: {
     listJobs: mocks.listJobs,
     listArtifacts: mocks.listArtifacts,
+    redactionPreview: mocks.redactionPreview,
+    applyRedaction: mocks.applyRedaction,
+    wordToPdf: mocks.wordToPdf,
     pagePreviewUrl: (jobId: number, page: number) => `/api/tools/jobs/${jobId}/pages/${page}`,
     downloadUrl: (jobId: number) => `/api/tools/jobs/${jobId}/download`,
   },
@@ -116,10 +122,10 @@ describe('ToolsView protected workflow restoration', () => {
     )
     expect(wrapper.text()).toContain('EMAIL')
 
-    await wrapper.findAll('.tool-card')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
     await sourceSelect.setValue('8')
     expect((sourceSelect.element as HTMLSelectElement).value).toBe('8')
-    await wrapper.findAll('.tool-card')[0]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[0]!.trigger('click')
     expect((sourceSelect.element as HTMLSelectElement).value).toBe('7')
     expect(sourceSelect.element).toHaveProperty('disabled', true)
     wrapper.unmount()
@@ -202,6 +208,113 @@ describe('ToolsView protected workflow restoration', () => {
 
     expect((wrapper.get('.document-picker select').element as HTMLSelectElement).value).toBe('8')
     expect(wrapper.getComponent(ProtectedArtifactAI).props('initialTask')).toBe('summary')
+    wrapper.unmount()
+  })
+
+  it('does not show an old protected artifact when the current redaction failed', async () => {
+    mocks.listJobs.mockResolvedValue([
+      { ...reviewJob(), status: 'failed', stage: 'failed', error_message: 'Unable to apply redactions safely' },
+      { ...reviewJob(), id: 40, status: 'completed', result_artifact_id: 9 },
+    ])
+    mocks.listArtifacts.mockResolvedValue([
+      { id: 9, source_document_id: 7, status: 'ready_for_ai', filename: 'old-protected.pdf' },
+    ])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    expect(wrapper.findComponent(ProtectedArtifactAI).exists()).toBe(false)
+    const failedTask = wrapper.findAll('.task-row')[0]!
+    expect(failedTask.get('.task-badge').classes()).toContain('failed')
+    expect(failedTask.text()).toContain('tools.refinement.redaction_failed')
+    expect(failedTask.find('a').exists()).toBe(false)
+    expect(failedTask.get('details').text()).toContain('Unable to apply redactions safely')
+    wrapper.unmount()
+  })
+
+  it('keeps the requested PDF selected even when another PDF has an unfinished review', async () => {
+    mocks.routeQuery.document_id = '8'
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    expect(wrapper.get('.source-filename').text()).toBe('other.pdf')
+    expect(wrapper.find('.redaction-review').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('distinguishes detection from applying and submits only reviewed areas', async () => {
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    mocks.applyRedaction.mockResolvedValue({ ...reviewJob(), status: 'pending', stage: 'queued', options: { operation: 'apply' } })
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    expect(wrapper.get('.review-notice').text()).toBe('tools.refinement.review_notice')
+    expect(wrapper.findAll('.task-row')[0]!.find('progress').exists()).toBe(false)
+    await wrapper.get('.apply-bar .button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.applyRedaction).toHaveBeenCalledWith(41, [
+      { id: 'pii-1', page: 2, rect: { x: 10, y: 20, width: 30, height: 5 } },
+    ], 'black')
+    expect(wrapper.get('.redaction-processing').text()).toContain('tools.redaction.protected_processing')
+    wrapper.unmount()
+  })
+
+  it('uploads a Word file directly independently of the selected PDF', async () => {
+    mocks.listJobs.mockResolvedValue([])
+    mocks.listArtifacts.mockResolvedValue([])
+    mocks.wordToPdf.mockResolvedValue({ ...reviewJob(), kind: 'word_to_pdf', source_document_id: null, status: 'pending' })
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+
+    const file = new File(['word'], 'source.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    expect(wrapper.get('.word-source').text()).toContain('source.docx')
+    await wrapper.findAll('.conversion-operation')[0]!.get('.button.primary').trigger('click')
+    await flushPromises()
+
+    expect(mocks.wordToPdf).toHaveBeenCalledWith(file)
+    expect(wrapper.get('.source-summary .source-filename').text()).toBe('source.pdf')
+    wrapper.unmount()
+  })
+
+  it('shows both compression sizes and never stretches a completed status into a progress bar', async () => {
+    mocks.listJobs.mockResolvedValue([{
+      ...reviewJob(), kind: 'compression', status: 'completed', result_filename: 'compressed.pdf',
+      result_size_bytes: 100, result_meta: { original_size_bytes: 1000, savings_percent: 90 },
+    }])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    const task = wrapper.get('.task-row')
+    expect(task.text()).toContain('1000 B')
+    expect(task.text()).toContain('100 B')
+    expect(task.text()).toContain('tools.refinement.reduction')
+    expect(task.find('progress').exists()).toBe(false)
+    expect(task.get('a').attributes('href')).toBe('/api/tools/jobs/41/download')
+    wrapper.unmount()
+  })
+
+  it('provides keyboard tab navigation and manual area controls', async () => {
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[0]!.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('keydown', { key: 'Home' })
+    await wrapper.get('.add-area').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(2)
+    const area = wrapper.findAll('.finding-overlay')[1]!
+    await area.get('.resize-se').trigger('keydown', { key: 'ArrowRight' })
+    expect(area.attributes('style')).toContain('width: 26%')
     wrapper.unmount()
   })
 })

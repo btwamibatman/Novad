@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { DocumentRead } from '../src/types/document'
+import en from '../src/i18n/en.json'
 
 const session = {
   session_id: 'test-session',
@@ -92,8 +93,15 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean) {
       })
       return
     }
-    if (path === '/api/tools/jobs') {
+    if (path === '/api/tools/jobs' || path === '/api/tools/artifacts') {
       await route.fulfill({ json: [] })
+      return
+    }
+    if (path === '/api/ai/provider-info') {
+      await route.fulfill({ json: {
+        provider: 'mock-provider', model: 'mock-model', service_tier: 'paid',
+        max_remote_retention_hours: 48, requires_verified_artifact: true,
+      } })
       return
     }
     if (path === '/api/documents' && request.method() === 'GET') {
@@ -224,21 +232,21 @@ test('analysis, AI reviews and chat retain their behavior', async ({ page }) => 
   ).toBeVisible({ timeout: 5000 })
 
   await page.getByRole('tab', { name: 'Summary' }).click()
-  await page.getByRole('button', { name: 'Summarize' }).click()
+  await page.getByRole('button', { name: 'Quick text summary (legacy)' }).click()
   await expect(page.getByText('Generated summary')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Content' }).click()
-  await page.getByRole('button', { name: 'Review content' }).click()
+  await page.getByRole('button', { name: 'Review extracted text (legacy)' }).click()
   await expect(page.getByText('Content review completed')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Layout' }).click()
   page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('button', { name: 'Review layout visually' }).click()
+  await page.getByRole('button', { name: 'Send original page images (legacy, paid tier)' }).click()
   await expect(page.getByText('Layout review completed', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Open AI chat' }).click()
   await page.getByPlaceholder('Ask about the selected document...').fill('Question')
-  await page.getByRole('button', { name: 'Send' }).click()
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.getByText('Question')).toBeVisible()
   await expect(page.getByText('AI answer')).toBeVisible()
 })
@@ -249,6 +257,7 @@ test('upload and delete update the document list', async ({ page }) => {
   await page.goto('/web/dist/')
   await expect(page.getByText('sample.pdf').first()).toBeVisible()
 
+  await page.getByRole('button', { name: 'Upload', exact: true }).click()
   await page.locator('input[type="file"]').setInputFiles({
     name: 'uploaded.pdf',
     mimeType: 'application/pdf',
@@ -260,7 +269,7 @@ test('upload and delete update the document list', async ({ page }) => {
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
-  await expect(page.getByText('No documents for this filter.')).toBeVisible()
+  await expect(page.getByText(en['documents.empty_title'], { exact: true })).toBeVisible()
 })
 
 test('tools page exposes local workflows with recommended compression by default', async ({ page }) => {
@@ -270,7 +279,7 @@ test('tools page exposes local workflows with recommended compression by default
   await page.getByRole('link', { name: 'Tools' }).click()
   await expect(page.getByRole('heading', { name: 'Document tools' })).toBeVisible()
 
-  await page.getByRole('button', { name: /Compress PDF/ }).click()
+  await page.getByRole('tab', { name: 'Compress PDF' }).click()
   await expect(page.getByLabel(/Recommended · Balanced/)).toBeChecked()
   await expect(page.getByText('Usually 30–60%')).toBeVisible()
 })

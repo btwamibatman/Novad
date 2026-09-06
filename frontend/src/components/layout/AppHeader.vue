@@ -40,13 +40,13 @@ async function logout(): Promise<void> {
         <RouterLink to="/tools">{{ t('nav.tools') }}</RouterLink>
       </nav>
     </div>
-    <div class="actions">
+    <div class="actions header-actions">
       <LanguageSwitcher />
       <ThemeToggle />
       <details class="profile-menu">
         <summary role="button" :aria-label="t('profile.menu')">
           <span class="profile-avatar" aria-hidden="true">{{ authStore.username.slice(0, 1).toUpperCase() }}</span>
-          <span>{{ authStore.username }}</span>
+          <span class="current-user" :title="authStore.username">{{ authStore.username }}</span>
         </summary>
         <div class="profile-popover">
           <span class="muted">{{ authStore.username }}</span>

@@ -25,22 +25,18 @@ const storage = computed(() => formatBytes(documentsStore.summary?.storage_bytes
 </script>
 
 <template>
-  <section class="metrics" :aria-label="t('metrics.label')">
-    <article class="metric">
-      <p class="metric-label">{{ t('metrics.documents') }}</p>
-      <p class="metric-value">{{ total }}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">{{ t('metrics.processed') }}</p>
-      <p class="metric-value">{{ processed }}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">{{ t('metrics.failed') }}</p>
-      <p class="metric-value">{{ failed }}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">{{ t('metrics.storage') }}</p>
-      <p class="metric-value">{{ storage }}</p>
-    </article>
-  </section>
+  <dl class="summary-row" :aria-label="t('metrics.label')">
+    <div class="summary-item"><dt>{{ t('metrics.documents') }}</dt><dd>{{ total }}</dd></div>
+    <div class="summary-item"><dt>{{ t('metrics.processed') }}</dt><dd>{{ processed }}</dd></div>
+    <div class="summary-item"><dt>{{ t('metrics.failed') }}</dt><dd>{{ failed }}</dd></div>
+    <div class="summary-item"><dt>{{ t('metrics.storage') }}</dt><dd>{{ storage }}</dd></div>
+  </dl>
 </template>
+
+<style scoped>
+.summary-row { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 0; padding: 8px 0 16px; border-bottom: 1px solid var(--border-soft); }
+.summary-item { display: flex; align-items: baseline; gap: 10px; }
+dt { color: var(--text-soft); font-size: 14px; }
+dd { margin: 0; font-weight: 650; font-size: 18px; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .summary-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; } }
+</style>

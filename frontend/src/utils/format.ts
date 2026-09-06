@@ -29,3 +29,11 @@ export function formatLanguageDistribution(distribution: Record<string, number>)
     .map(([language, share]) => `${language} ${Math.round(Number(share) * 100)}%`)
     .join(', ')
 }
+
+export function languageName(language: string, locale: string): string {
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(language) ?? language
+  } catch {
+    return language
+  }
+}

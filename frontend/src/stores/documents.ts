@@ -23,6 +23,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   const search = ref('')
   const statusFilter = ref<'all' | DocumentStatus>('all')
   const loading = ref(false)
+  const loadFailed = ref(false)
   const pendingAction = ref<PendingAction | null>(null)
 
   const selectedDocument = computed(
@@ -61,6 +62,7 @@ export const useDocumentsStore = defineStore('documents', () => {
 
   async function load(refreshSession = true): Promise<void> {
     loading.value = true
+    loadFailed.value = false
     try {
       if (refreshSession) {
         await useAuthStore().checkSession()
@@ -77,6 +79,9 @@ export const useDocumentsStore = defineStore('documents', () => {
       ) {
         selectedId.value = null
       }
+    } catch (error) {
+      loadFailed.value = true
+      throw error
     } finally {
       loading.value = false
     }
@@ -155,6 +160,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     search.value = ''
     statusFilter.value = 'all'
     loading.value = false
+    loadFailed.value = false
     pendingAction.value = null
   }
 
@@ -165,6 +171,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     search,
     statusFilter,
     loading,
+    loadFailed,
     pendingAction,
     selectedDocument,
     processedDocuments,

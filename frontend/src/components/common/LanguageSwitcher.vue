@@ -31,6 +31,8 @@ function selectLocale(nextLocale: AppLocale): void {
       class="language-button"
       :class="{ active: locale === option }"
       type="button"
+      :lang="option"
+      :title="option === 'en' ? 'English' : 'Русский'"
       :aria-pressed="locale === option"
       @click="selectLocale(option)"
     >

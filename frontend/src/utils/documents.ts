@@ -1,17 +1,17 @@
 import type { DocumentRead } from '@/types/document'
-import { formatLanguageDistribution } from '@/utils/format'
+import { languageName } from '@/utils/format'
 
 export type Translate = (
   key: string,
   params?: Record<string, string | number>,
 ) => string
 
-export function documentLanguage(document: DocumentRead): string {
-  return (
-    formatLanguageDistribution(document.language_distribution) ||
-    document.detected_language ||
-    '-'
-  )
+export function documentLanguage(document: DocumentRead, locale = 'en'): string {
+  const languages = Object.entries(document.language_distribution)
+    .filter(([, share]) => share > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([language]) => languageName(language, locale))
+  return languages.join(', ') || (document.detected_language ? languageName(document.detected_language, locale) : '—')
 }
 
 export function qualityWarning(document: DocumentRead | null, t: Translate): string {

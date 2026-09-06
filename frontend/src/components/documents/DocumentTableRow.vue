@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { documentsApi } from '@/api/documents'
 import { useDocumentsStore } from '@/stores/documents'
 import type { DocumentRead } from '@/types/document'
-import { aiState, documentLanguage } from '@/utils/documents'
+import { documentLanguage } from '@/utils/documents'
 import { formatBytes } from '@/utils/format'
 
 const props = defineProps<{
@@ -21,16 +21,12 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const documentsStore = useDocumentsStore()
 const selected = computed(() => documentsStore.selectedId === props.document.id)
-const state = computed(() => aiState(props.document))
-const aiClass = computed(() => {
-  if (state.value === 'error') return 'failed'
-  if (state.value === 'ready') return 'processed'
-  return 'neutral'
-})
 const needsAnalysis = computed(() => ['uploaded', 'failed'].includes(props.document.status))
 
-function select(): void {
+async function select(): Promise<void> {
   documentsStore.selectedId = props.document.id
+  await nextTick()
+  window.document.getElementById('document-selection')?.focus({ preventScroll: true })
 }
 
 function download(): void {
@@ -53,28 +49,20 @@ function primaryAction(): void {
     @click="select"
   >
     <td>
-      <p class="file-name">{{ document.filename }}</p>
-      <span class="file-meta">
-        #{{ document.id }}
-        {{
-          t('documents.created', {
-            date: new Date(document.created_at).toLocaleString(locale),
-          })
-        }}
-      </span>
+      <button class="file-name file-select" type="button" :aria-expanded="selected" aria-controls="document-selection" @click.stop="select">
+        {{ document.filename }}
+      </button>
+      <span v-if="document.detected_language || Object.keys(document.language_distribution).length" class="file-language">{{ documentLanguage(document, locale) }}</span>
     </td>
-    <td>{{ document.content_type }}</td>
     <td>
       <span class="badge" :class="document.status">{{ t(`status.${document.status}`) }}</span>
     </td>
     <td>{{ formatBytes(document.size_bytes) }}</td>
-    <td>{{ documentLanguage(document) }}</td>
-    <td>{{ document.word_count || 0 }}</td>
-    <td><span class="badge" :class="aiClass">{{ t(`ai.${state}`) }}</span></td>
+    <td><time :datetime="document.created_at" :title="new Date(document.created_at).toLocaleString(locale)">{{ new Date(document.created_at).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) }}</time></td>
     <td>
       <div class="row-actions" @click.stop>
         <button
-          class="button small primary"
+          class="button small"
           :class="{ loading: documentsStore.isPending('analyze', document.id) }"
           type="button"
           :disabled="documentsStore.busy"
@@ -84,9 +72,13 @@ function primaryAction(): void {
           {{
             needsAnalysis && documentsStore.isPending('analyze', document.id)
               ? t('documents.analyzing')
-              : needsAnalysis
-                ? t('documents.analyze')
-                : t('documents.open_result')
+              : document.status === 'failed'
+                ? t('documents.retry_analysis')
+                : needsAnalysis
+                  ? t('documents.analyze')
+                  : document.status === 'analyzing'
+                    ? t('documents.view_progress')
+                    : t('documents.open_result')
           }}
         </button>
         <details class="row-menu">
@@ -117,3 +109,12 @@ function primaryAction(): void {
     </td>
   </tr>
 </template>
+
+<style scoped>
+.file-select { display: block; border: 0; padding: 2px 0; background: transparent; color: var(--text); text-align: left; overflow-wrap: anywhere; line-height: 1.5; }
+.file-select:hover { text-decoration: underline; text-underline-offset: 3px; }
+.file-language { display: block; color: var(--text-soft); margin-top: 4px; font-size: 14px; }
+td { padding-top: 16px; padding-bottom: 16px; }
+time { color: var(--text-soft); font-size: 14px; }
+.row-actions { flex-wrap: nowrap; align-items: start; }
+</style>

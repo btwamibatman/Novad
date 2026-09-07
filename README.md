@@ -50,6 +50,90 @@ Stop the services with:
 
 docker compose down
 
+
+## Local AI setup: Ollama and Qwen3.5-4B
+
+This setup uses Windows with Docker Desktop. Ollama runs on the laptop and serves
+Qwen over HTTP; the API and analysis worker run in Docker and connect to it.
+The model stays on the laptop and does not need to be copied into the Docker image.
+
+
+### 1. Download Ollama and the model
+
+Download from the [official Ollama Windows page](https://ollama.com/download/windows)
+and start the installed application. 
+
+Open a new PowerShell terminal:
+
+ollama --version
+ollama pull qwen3.5:4b
+ollama run qwen3.5:4b
+
+
+Send a short question to test the model, then enter `/bye` to leave the chat.
+The model download is approximately 3.4 GB; runtime RAM/VRAM usage is higher and
+depends on context size. Run `ollama list` to see downloaded models and `ollama ps`
+after a request to see loaded models and CPU/GPU usage.
+
+### 2. Configure the local Ollama server
+
+Ollama runs in the background on port `11434`. Do not start a second `ollama serve`
+process while the desktop application is already serving requests.
+
+For an initial laptop configuration, add these **Windows user environment
+variables** through "Edit environment variables for your account":
+
+```dotenv
+OLLAMA_CONTEXT_LENGTH=8192
+OLLAMA_NUM_PARALLEL=1
+OLLAMA_NO_CLOUD=1
+```
+
+These set an initial context limit, one parallel request, and local-only operation.
+Quit Ollama from the system tray and reopen it after changing the variables.
+Putting them in the project's `.env` does not configure the Ollama process on Windows.
+See the [Ollama configuration FAQ](https://docs.ollama.com/faq) for details.
+
+Check the local server:
+
+```powershell
+Invoke-RestMethod http://localhost:11434/api/tags
+```
+
+The response should list `qwen3.5:4b`.
+
+### 3. Pass the connection settings to Docker
+
+Ensure the project's `.env` contains these values (also provided in `.env.example`):
+
+```dotenv
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen3.5:4b
+```
+
+Both `api` and `analysis-worker` already use `env_file: .env` in Compose, so no
+Dockerfile changes, model volumes, or additional port mappings are required.
+Docker passes these values into the containers; Python must read them and send
+the HTTP request. Docker does not automatically redirect AI calls.
+
+Inside a container, `localhost` refers to that container. Docker Desktop provides
+`host.docker.internal` to reach the laptop; see
+[Docker Desktop networking](https://docs.docker.com/desktop/features/networking/).
+For a Python process running directly on Windows, use `http://localhost:11434` instead.
+
+From the project directory, start or recreate the services to load the settings:
+
+```powershell
+docker compose up -d --force-recreate api analysis-worker
+```
+
+### 4. Verify a model response from Docker
+
+Run this entire block in PowerShell from the project directory. It reads the
+container's environment without fallback values, checks the model list, and sends
+a real inference request using [Ollama's chat API](https://docs.ollama.com/api/chat):
+
+
 ## Local Development
 
 Local development requires Python 3.12, LibreOffice, Ghostscript, and Tesseract with `rus`, `kaz`, `eng`, and `osd` language data. The Docker image installs all of them.

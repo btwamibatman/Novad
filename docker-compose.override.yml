@@ -1,5 +1,6 @@
 services:
   api:
+    ports: !reset []
     command:
       - uvicorn
       - app.main:app
@@ -20,3 +21,23 @@ services:
     volumes:
       - ./app:/app/app
       - ./storage:/app/storage
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /frontend
+    command: ["sh", "-c", "npm ci --cache /root/.npm && exec npm run dev -- --host 0.0.0.0 --port 8000 --strictPort"]
+    environment:
+      DEV_API_TARGET: http://api:8000
+      DEV_USE_POLLING: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./frontend:/frontend
+      - frontend_node_modules:/frontend/node_modules
+      - frontend_npm_cache:/root/.npm
+    depends_on:
+      - api
+
+volumes:
+  frontend_node_modules:
+  frontend_npm_cache:

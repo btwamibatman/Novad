@@ -31,7 +31,7 @@ A full-stack application for uploading PDF documents, extracting native or OCR t
    Keep `GEMINI_SERVICE_TIER=unpaid` for the conservative default. The primary UI
    then allows external document analysis only through a verified protected copy.
 
-3. Start PostgreSQL, the API, and the analysis worker:
+3. Start PostgreSQL, the API, the analysis worker, and the development frontend:
 
    docker compose up --build -d
 
@@ -45,6 +45,25 @@ A full-stack application for uploading PDF documents, extracting native or OCR t
 Web console: `http://localhost:8000`
 Swagger UI: `http://localhost:8000/docs`
 Health check: `http://localhost:8000/health`
+
+### Development with automatic updates
+
+After the initial build, start everything with `docker compose up -d` and open
+`http://localhost:8000`. No separate `npm run dev` terminal is needed.
+Docker Compose automatically loads `docker-compose.override.yml` (use a current
+Docker Compose v2 with support for `!reset`). Vite serves the interface on port
+8000 and proxies API, health, and documentation requests to FastAPI internally.
+
+logs for frontend api 
+```powershell
+docker compose logs -f frontend api
+```
+
+After changing frontend dependencies, run `docker compose restart frontend`.
+For worker code changes, run `docker compose restart analysis-worker`.
+Changes to `.env` require container recreation; Python dependencies or Dockerfile
+changes require an image rebuild, and database schema changes require migrations.
+
 
 Stop the services with:
 

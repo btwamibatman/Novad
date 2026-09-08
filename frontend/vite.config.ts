@@ -3,18 +3,28 @@ import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
 
-export default defineConfig({
+const apiTarget = process.env.DEV_API_TARGET || 'http://localhost:8000'
+const apiProxy = { target: apiTarget, changeOrigin: false }
+
+export default defineConfig(({ command }) => ({
   plugins: [vue()],
-  base: '/web/dist/',
+  base: command === 'serve' ? '/' : '/web/dist/',
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
   server: {
+    watch: {
+      usePolling: process.env.DEV_USE_POLLING === 'true',
+      interval: 300,
+    },
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
+      '/api': apiProxy,
+      '/health': apiProxy,
+      '/docs': apiProxy,
+      '/redoc': apiProxy,
+      '/openapi.json': apiProxy,
     },
   },
   build: {
@@ -27,4 +37,4 @@ export default defineConfig({
     setupFiles: ['./src/__tests__/setup.ts'],
     include: ['src/**/*.spec.ts'],
   },
-})
+}))

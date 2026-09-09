@@ -73,7 +73,7 @@ describe('protected AI entry points and disclosure', () => {
       name: 'tools',
       query: { task: 'summary', document_id: '33' },
     })
-    expect(wrapper.text()).toContain('Quick text summary (legacy)')
+    expect(wrapper.text()).toContain('Quick text summary')
     wrapper.unmount()
   })
 
@@ -86,7 +86,7 @@ describe('protected AI entry points and disclosure', () => {
       name: 'tools',
       query: { task: 'content_review', document_id: '33' },
     })
-    expect(wrapper.text()).toContain('Review extracted text (legacy)')
+    expect(wrapper.text()).toContain('Review extracted text')
     wrapper.unmount()
   })
 
@@ -100,7 +100,7 @@ describe('protected AI entry points and disclosure', () => {
       name: 'tools',
       query: { task: 'layout_review', document_id: '33' },
     })
-    expect(wrapper.text()).toContain('legacy, paid tier')
+    expect(wrapper.text()).toContain('Review original page layout')
     wrapper.unmount()
   })
 
@@ -110,11 +110,11 @@ describe('protected AI entry points and disclosure', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Provider details are unavailable')
-    expect(wrapper.text()).not.toContain('blocked for unpaid Gemini')
+    expect(wrapper.text()).not.toContain('blocked for the unpaid service tier')
     wrapper.unmount()
   })
 
-  it('keeps chat grid structure intact and discloses the external provider', async () => {
+  it('keeps chat grid structure intact and explains local processing without model names', async () => {
     const document = makeDocument({ id: 33 })
     mocks.useDocumentChat.mockReturnValue({
       open: ref(true),
@@ -134,11 +134,10 @@ describe('protected AI entry points and disclosure', () => {
     await flushPromises()
 
     expect(wrapper.get('.ai-chat-body').element.children).toHaveLength(3)
-    expect(wrapper.text()).toContain('External provider: Gemini')
-    expect(wrapper.text()).toContain('model: gemini-test')
-    expect(wrapper.get('.ai-chat-context a').attributes('href')).toBe(
-      'https://ai.google.dev/gemini-api/terms',
-    )
+    expect(wrapper.text()).toContain('Text is processed locally.')
+    expect(wrapper.text()).not.toContain('Gemini')
+    expect(wrapper.text()).not.toContain('gemini-test')
+    expect(wrapper.find('.ai-chat-context a').exists()).toBe(false)
     wrapper.unmount()
   })
 })

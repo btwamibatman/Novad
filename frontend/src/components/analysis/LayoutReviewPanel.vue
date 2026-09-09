@@ -68,7 +68,7 @@ async function review(): Promise<void> {
   if (
     !document.value ||
     !originalImagesAllowed.value ||
-    !window.confirm(t('layout_review.consent_confirm'))
+    (providerInfo.value?.provider.toLowerCase() !== 'ollama' && !window.confirm(t('layout_review.consent_confirm')))
   ) {
     return
   }
@@ -124,9 +124,6 @@ onMounted(async () => {
         </button>
         <small v-else>{{ originalImagesMessage }}</small>
       </div>
-      <p v-if="originalImagesAllowed" class="control-help">
-        {{ t('layout_review.legacy_help') }}
-      </p>
       <div class="preview">{{ content }}</div>
     </div>
   </article>

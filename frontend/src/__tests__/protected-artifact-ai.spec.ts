@@ -114,6 +114,7 @@ describe('ProtectedArtifactAI', () => {
       service_tier: 'paid',
       max_remote_retention_hours: 48,
       requires_verified_artifact: true,
+      external_review_available: true,
     })
   })
   afterEach(() => {
@@ -154,11 +155,12 @@ describe('ProtectedArtifactAI', () => {
     await wrapper.get('button.primary').trigger('click')
 
     const dialog = wrapper.get('[role="dialog"]')
+    await dialog.get('select[name="processing-mode"]').setValue('external')
     expect(dialog.text()).toContain('только проверенная защищённая PDF-копия')
-    expect(dialog.text()).toContain('AI-провайдер: Gemini')
-    expect(dialog.text()).toContain('gemini-test')
+    expect(dialog.text()).not.toContain('Gemini')
+    expect(dialog.text()).not.toContain('gemini-test')
     expect(dialog.text()).toContain('Тариф сервиса: Платный')
-    expect((dialog.get('select').element as HTMLSelectElement).value).toBe('layout_review')
+    expect((dialog.get('select[name="analysis-task"]').element as HTMLSelectElement).value).toBe('layout_review')
     expect(dialog.get('button[type="submit"]').attributes('disabled')).toBeDefined()
 
     await dialog.get('input[value="retain_48h"]').setValue()
@@ -169,6 +171,7 @@ describe('ProtectedArtifactAI', () => {
     await flushPromises()
 
     expect(apiMocks.createJob).toHaveBeenCalledWith({
+      processing_mode: 'external',
       artifact_id: 9,
       task: 'layout_review',
       retention: 'retain_48h',
@@ -194,9 +197,9 @@ describe('ProtectedArtifactAI', () => {
     await wrapper.get('button.primary').trigger('click')
     const dialog = wrapper.get('[role="dialog"]')
     expect(dialog.text()).toContain('Confirm AI analysis')
-    expect(dialog.text()).toContain('Service tier: Paid')
-    expect(dialog.text()).toContain('Delete after analysis')
-    expect((dialog.get('select').element as HTMLSelectElement).value).toBe('summary')
+    expect(dialog.text()).toContain('The protected copy is processed locally.')
+    expect(dialog.find('input[type="checkbox"]').exists()).toBe(false)
+    expect((dialog.get('select[name="analysis-task"]').element as HTMLSelectElement).value).toBe('summary')
     wrapper.unmount()
   })
 

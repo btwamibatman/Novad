@@ -37,6 +37,8 @@ const task = ref<AIAnalysisTask>('content_review')
 const retention = ref<AIFileRetention>('delete_after_analysis')
 const processingConsent = ref(false)
 const termsConsent = ref(false)
+const processingMode = ref<'local' | 'review' | 'external'>('local')
+const externalProcessing = computed(() => processingMode.value !== 'local')
 const loadingJobs = ref(false)
 const creatingJob = ref(false)
 const deletingRemote = ref(false)
@@ -74,7 +76,7 @@ const activeAnalysis = computed(() =>
 const hasRemoteCopies = computed(() =>
   artifactJobs.value.some((job) => job.remote_file_present),
 )
-const result = computed(() => selectedJob.value?.result ?? {})
+const result = computed(() => selectedJob.value?.result.local_analysis ?? selectedJob.value?.result ?? {})
 const resultCoverage = computed(() => result.value.coverage)
 const policyCategories = computed(() => {
   const categories = props.artifact.privacy_policy.categories
@@ -214,18 +216,20 @@ function openConsent(): void {
   retention.value = 'delete_after_analysis'
   processingConsent.value = false
   termsConsent.value = false
+  processingMode.value = 'local'
   errorMessage.value = ''
   consentOpen.value = true
 }
 
 async function createAnalysis(): Promise<void> {
-  if (!processingConsent.value || !termsConsent.value) return
+  if (externalProcessing.value && (!processingConsent.value || !termsConsent.value)) return
   creatingJob.value = true
   errorMessage.value = ''
   try {
     const job = await aiAnalysisApi.createJob({
       artifact_id: props.artifact.id,
       task: task.value,
+      processing_mode: processingMode.value,
       retention: retention.value,
       consent_to_external_processing: processingConsent.value,
       acknowledge_provider_data_terms: termsConsent.value,
@@ -457,7 +461,6 @@ onBeforeUnmount(() => {
           <div class="analysis-job-row">
             <div>
               <strong>{{ taskLabel(selectedJob.task) }}</strong>
-              <small>{{ selectedJob.provider }}<template v-if="selectedJob.model"> · {{ selectedJob.model }}</template></small>
               <small>
                 {{ t('tools.protected_ai.analysis.remote_file', { status: cleanupStatusLabel(selectedJob.remote_cleanup_status) }) }}<template v-if="selectedJob.provider_file_expires_at"> · {{ t('tools.protected_ai.analysis.expires_at', { date: formatExpiry(selectedJob.provider_file_expires_at) }) }}</template>
               </small>
@@ -482,7 +485,8 @@ onBeforeUnmount(() => {
             {{ selectedJob.remote_cleanup_error }}
           </p>
 
-          <template v-if="selectedJob.status === 'completed'">
+          <template v-if="selectedJob.status === 'completed' || result.overview">
+            <p v-if="selectedJob.status !== 'completed'" class="flow-notice">{{ t('tools.protected_ai.local_result_saved') }}</p>
             <div class="result-summary">
               <div>
                 <span class="result-label">{{ t('tools.protected_ai.results.overview') }}</span>
@@ -532,6 +536,27 @@ onBeforeUnmount(() => {
               </article>
             </div>
 
+            <section v-if="result.external_review" class="result-block">
+              <h5>{{ t('tools.protected_ai.external_review') }}</h5>
+              <p>{{ t('tools.protected_ai.review_note') }}</p>
+              <p>{{ result.external_review.overview }}</p>
+              <p>{{ result.external_review.verdict }}</p>
+              <p>{{ t('tools.protected_ai.results.pages', { pages: result.external_review.coverage.pages_reviewed.join(', ') }) }}</p>
+              <p v-if="result.external_review.coverage.limitations.length">{{ result.external_review.coverage.limitations.join('; ') }}</p>
+              <article v-for="(point, index) in result.external_review.key_points" :key="`review-point-${index}`" class="result-card">
+                <strong>{{ point.text }}</strong>
+                <button v-if="point.page" class="citation-link" type="button" @click="showPage(point.page)">{{ t('tools.protected_ai.results.page_short', { page: point.page }) }}</button>
+                <p>{{ point.evidence }}</p>
+                <small>{{ t(point.evidence_verified ? 'chat.quote_matched' : 'chat.quote_unmatched') }}</small>
+              </article>
+              <article v-for="(finding, index) in result.external_review.findings" :key="`review-finding-${index}`" class="result-card">
+                <p>{{ finding.explanation }}</p>
+                <button class="citation-link" type="button" @click="showPage(finding.page)">{{ t('tools.protected_ai.results.page_short', { page: finding.page }) }}</button>
+                <p>{{ finding.evidence }}</p>
+                <small>{{ t(finding.evidence_verified ? 'chat.quote_matched' : 'chat.quote_unmatched') }}</small>
+                <p v-if="finding.suggestion"><strong>{{ t('chat.suggestion') }}</strong> {{ finding.suggestion }}</p>
+              </article>
+            </section>
           </template>
 
           <button
@@ -558,13 +583,19 @@ onBeforeUnmount(() => {
         </div>
 
         <form class="consent-form" @submit.prevent="createAnalysis">
+          <label class="form-control">
+            <span>{{ t('tools.protected_ai.processing_mode') }}</span>
+            <select v-model="processingMode" name="processing-mode" class="select" @change="processingConsent = false; termsConsent = false">
+              <option value="local">{{ t('tools.protected_ai.mode.local') }}</option>
+              <option value="review" :disabled="!providerInfo?.external_review_available">{{ t('tools.protected_ai.mode.review') }}</option>
+              <option value="external" :disabled="!providerInfo?.external_review_available">{{ t('tools.protected_ai.mode.external') }}</option>
+            </select>
+          </label>
           <p class="flow-notice">
-            {{ t('tools.protected_ai.consent.notice') }}
+            {{ t(externalProcessing ? 'tools.protected_ai.consent.notice' : 'tools.protected_ai.local_notice') }}
           </p>
 
-          <div v-if="providerInfo" class="provider-disclosure">
-            <strong>{{ t('tools.protected_ai.consent.provider', { provider: providerInfo.provider }) }}</strong>
-            <span>{{ t('tools.protected_ai.consent.model', { model: providerInfo.model }) }}</span>
+          <div v-if="providerInfo && externalProcessing" class="provider-disclosure">
             <span>{{ t('tools.protected_ai.consent.service_tier', { tier: serviceTierLabel(providerInfo.service_tier) }) }}</span>
             <span>{{ t('tools.protected_ai.consent.max_retention', { hours: providerInfo.max_remote_retention_hours }) }}</span>
             <small v-if="providerInfo.requires_verified_artifact">
@@ -574,25 +605,24 @@ onBeforeUnmount(() => {
               {{ t('tools.protected_ai.consent.unpaid_warning') }}
             </small>
             <a
-              v-if="providerInfo.provider.toLowerCase() === 'gemini'"
               href="https://ai.google.dev/gemini-api/terms"
               target="_blank"
               rel="noopener noreferrer"
             >
-              {{ t('tools.protected_ai.consent.gemini_terms') }}
+              {{ t('tools.protected_ai.consent.provider_terms') }}
             </a>
           </div>
 
           <label class="form-control">
             <span>{{ t('tools.protected_ai.consent.task_label') }}</span>
-            <select v-model="task" class="select">
+            <select v-model="task" name="analysis-task" class="select">
               <option value="summary">{{ taskLabel('summary') }}</option>
               <option value="content_review">{{ taskLabel('content_review') }}</option>
               <option value="layout_review">{{ taskLabel('layout_review') }}</option>
             </select>
           </label>
 
-          <fieldset class="retention-options">
+          <fieldset v-if="externalProcessing" class="retention-options">
             <legend>{{ t('tools.protected_ai.consent.retention_legend') }}</legend>
             <label class="retention-card">
               <input v-model="retention" type="radio" value="delete_after_analysis" />
@@ -604,11 +634,11 @@ onBeforeUnmount(() => {
             </label>
           </fieldset>
 
-          <label class="consent-check">
+          <label v-if="externalProcessing" class="consent-check">
             <input v-model="processingConsent" type="checkbox" />
             <span>{{ t('tools.protected_ai.consent.processing') }}</span>
           </label>
-          <label class="consent-check">
+          <label v-if="externalProcessing" class="consent-check">
             <input v-model="termsConsent" type="checkbox" />
             <span>{{ t('tools.protected_ai.consent.terms') }}</span>
           </label>
@@ -618,7 +648,7 @@ onBeforeUnmount(() => {
             <button
               class="button primary"
               type="submit"
-              :disabled="creatingJob || !processingConsent || !termsConsent"
+              :disabled="creatingJob || (externalProcessing && (!processingConsent || !termsConsent))"
             >
               {{ creatingJob ? t('tools.protected_ai.consent.starting') : t('tools.protected_ai.consent.submit') }}
             </button>

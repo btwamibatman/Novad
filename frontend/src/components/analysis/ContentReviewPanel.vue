@@ -8,7 +8,6 @@ import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
 import { useDocumentsStore } from '@/stores/documents'
 import type { ContentReviewMode } from '@/types/document'
-import { qualityWarning } from '@/utils/documents'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
@@ -16,9 +15,6 @@ const { handle } = useApiErrorHandler()
 const { show } = useToasts()
 const mode = ref<ContentReviewMode>('quick')
 const document = computed(() => documentsStore.selectedDocument)
-const warning = computed(() =>
-  qualityWarning(document.value, (key, params) => t(key, params ?? {})),
-)
 const pending = computed(
   () =>
     document.value !== null &&
@@ -57,7 +53,7 @@ const content = computed(() => {
       : document.value
         ? t('summary.must_analyze')
         : t('content_review.analyze_first_help'))
-  return warning.value ? `${warning.value}\n\n${text}` : text
+  return text
 })
 
 async function review(): Promise<void> {

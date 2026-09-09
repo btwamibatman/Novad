@@ -5,7 +5,7 @@ import { documentsApi } from '@/api/documents'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useAuthStore } from '@/stores/auth'
 import { useDocumentsStore } from '@/stores/documents'
-import type { AIChatMessage } from '@/types/document'
+import type { AIChatMessage, AIChatMode } from '@/types/document'
 
 interface StoredChat {
   expires_at: string
@@ -104,7 +104,7 @@ export function useDocumentChat() {
         : processedDocuments.value[0]?.id ?? null
   }
 
-  async function ask(question: string): Promise<boolean> {
+  async function ask(question: string, mode: AIChatMode = 'question'): Promise<boolean> {
     const cleanQuestion = question.trim()
     const document = selectedDocument.value
     if (!document || !cleanQuestion) {
@@ -127,7 +127,8 @@ export function useDocumentChat() {
         requestDocumentId,
         {
           question: cleanQuestion,
-          history: history.slice(-12),
+          history: history.slice(-12).map(({ role, content }) => ({ role, content: content.slice(0, 1500) })),
+          mode,
         },
         requestController.signal,
       )
@@ -138,6 +139,9 @@ export function useDocumentChat() {
         ...readMessages(requestDocumentId),
         {
           role: 'assistant',
+          conclusions: response.conclusions,
+          limitations: response.limitations,
+          pages_reviewed: response.pages_reviewed,
           content: response.truncated_context
             ? `${response.answer}\n\n${t('chat.truncated_note')}`
             : response.answer,

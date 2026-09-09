@@ -6,20 +6,16 @@ import { RouterLink } from 'vue-router'
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
-import { qualityWarning } from '@/utils/documents'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
 const document = computed(() => documentsStore.selectedDocument)
-const warning = computed(() =>
-  qualityWarning(document.value, (key, params) => t(key, params ?? {})),
-)
 const state = computed(() => {
   if (!document.value) return t('common.no_document_selected')
   if (document.value.ai_error) return t('common.error')
-  if (document.value.ai_summary) return document.value.ai_model || t('common.generated')
+  if (document.value.ai_summary) return t('common.generated')
   return document.value.status === 'processed'
     ? t('common.ready')
     : t('common.analyze_first')
@@ -33,7 +29,7 @@ const summary = computed(() => {
       : document.value
         ? t('summary.must_analyze')
         : t('summary.analyze_first_help'))
-  return warning.value ? `${warning.value}\n\n${text}` : text
+  return text
 })
 const pending = computed(
   () => document.value !== null && documentsStore.isPending('summarize', document.value.id),
@@ -80,7 +76,6 @@ async function summarize(): Promise<void> {
           {{ pending ? t('documents.summarizing') : t('summary.legacy_action') }}
         </button>
       </div>
-      <p class="control-help">{{ t('summary.legacy_help') }}</p>
       <div class="preview">{{ summary }}</div>
     </div>
   </article>

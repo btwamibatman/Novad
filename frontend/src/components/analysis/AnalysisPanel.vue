@@ -3,14 +3,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useDocumentsStore } from '@/stores/documents'
-import { qualityWarning } from '@/utils/documents'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const document = computed(() => documentsStore.selectedDocument)
-const warning = computed(() =>
-  qualityWarning(document.value, (key, params) => t(key, params ?? {})),
-)
 const state = computed(() => {
   if (!document.value) return t('common.no_document_selected')
   return document.value.status === 'processed'
@@ -31,7 +27,6 @@ const text = computed(
       <span class="muted">{{ state }}</span>
     </div>
     <div class="panel-body">
-      <div v-if="warning" class="notice">{{ warning }}</div>
       <div class="preview">{{ text }}</div>
     </div>
   </article>

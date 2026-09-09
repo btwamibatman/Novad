@@ -9,10 +9,9 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { aiAnalysisApi } from '@/api/ai'
 import { useDocumentChat } from '@/composables/useDocumentChat'
 import { useDocumentsStore } from '@/stores/documents'
-import type { AIProviderInfo } from '@/types/document'
+import type { AIChatMode } from '@/types/document'
 
 interface DragState {
   pointerId: number
@@ -28,8 +27,7 @@ const dragHandle = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
 const messageList = ref<HTMLElement | null>(null)
 const question = ref('')
-const providerInfo = ref<AIProviderInfo | null>(null)
-const providerInfoState = ref<'loading' | 'ready' | 'error'>('loading')
+const mode = ref<AIChatMode>('question')
 let drag: DragState | null = null
 
 const positioned = computed(() => Boolean(chat.position.value) && !chat.maximized.value)
@@ -49,20 +47,6 @@ const stateText = computed(() =>
     ? t('chat.answering_from', { id: chat.selectedDocument.value.id })
     : t('chat.analyze_first'),
 )
-const providerDisclosure = computed(() => {
-  if (providerInfo.value) {
-    return t('chat.provider_disclosure', {
-      provider: providerInfo.value.provider,
-      model: providerInfo.value.model,
-      tier: providerInfo.value.service_tier,
-    })
-  }
-  return t(
-    providerInfoState.value === 'error'
-      ? 'chat.provider_unavailable'
-      : 'chat.provider_loading',
-  )
-})
 
 function move(left: number, top: number): void {
   if (!popup.value) return
@@ -135,10 +119,10 @@ function changeDocument(event: Event): void {
 }
 
 async function submit(): Promise<void> {
-  const currentQuestion = question.value
+  const currentQuestion = question.value.trim() || (mode.value === 'question' ? '' : t(`chat.mode.${mode.value}`))
   if (!currentQuestion.trim()) return
   question.value = ''
-  await chat.ask(currentQuestion)
+  await chat.ask(currentQuestion, mode.value)
 }
 
 function keepInsideViewport(): void {
@@ -165,13 +149,6 @@ watch(
 onMounted(async () => {
   window.addEventListener('blur', stopDragOnBlur)
   window.addEventListener('resize', keepInsideViewport)
-  try {
-    providerInfo.value = await aiAnalysisApi.getProviderInfo()
-    providerInfoState.value = 'ready'
-  } catch {
-    providerInfo.value = null
-    providerInfoState.value = 'error'
-  }
 })
 
 onBeforeUnmount(() => {
@@ -244,13 +221,7 @@ onBeforeUnmount(() => {
           </option>
         </select>
         <p class="control-help">
-          {{ t('chat.extracted_text_notice') }} {{ providerDisclosure }}
-          <a
-            v-if="providerInfo?.provider.toLowerCase() === 'gemini'"
-            href="https://ai.google.dev/gemini-api/terms"
-            target="_blank"
-            rel="noopener noreferrer"
-          >{{ t('chat.provider_terms') }}</a>
+          {{ t('chat.local_processing') }}
         </p>
       </div>
       <div ref="messageList" class="ai-chat-messages">
@@ -267,10 +238,32 @@ onBeforeUnmount(() => {
           class="ai-chat-message"
           :class="message.role"
         >
-          {{ message.content }}
+          <template v-if="message.conclusions?.length">
+            <article v-for="(conclusion, conclusionIndex) in message.conclusions" :key="conclusionIndex" class="conclusion">
+              <strong>{{ t(conclusion.requires_review ? 'chat.needs_review' : 'chat.observation') }}</strong>
+              <p>{{ conclusion.observation }}</p>
+              <blockquote v-for="(citation, citationIndex) in conclusion.citations" :key="citationIndex">
+                {{ citation.quote }}
+                <small>{{ citation.page ? t('chat.page', { page: citation.page }) : t('chat.page_unknown') }} · {{ t(citation.text_matched ? 'chat.quote_matched' : 'chat.quote_unmatched') }}</small>
+              </blockquote>
+              <p v-if="conclusion.suggestion"><strong>{{ t('chat.suggestion') }}</strong> {{ conclusion.suggestion }}</p>
+            </article>
+            <small>{{ t('chat.evidence_help') }}</small>
+            <p v-if="message.limitations?.length">{{ message.limitations.join(' ') }}</p>
+          </template>
+          <template v-else>{{ message.content }}</template>
         </div>
       </div>
       <form class="ai-chat-form" @submit.prevent="submit">
+        <label class="chat-mode">
+          {{ t('chat.mode_label') }}
+          <select v-model="mode" class="select" :disabled="disabled">
+            <option value="question">{{ t('chat.mode.question') }}</option>
+            <option value="analysis">{{ t('chat.mode.analysis') }}</option>
+            <option value="suggestions">{{ t('chat.mode.suggestions') }}</option>
+          </select>
+          <small v-if="mode !== 'question'">{{ t('chat.full_analysis_help') }}</small>
+        </label>
         <textarea
           ref="input"
           v-model="question"
@@ -281,7 +274,7 @@ onBeforeUnmount(() => {
           :disabled="disabled"
         ></textarea>
         <button class="button primary" type="submit" :disabled="disabled">
-          {{ t('chat.send') }}
+          {{ t(chat.asking.value ? 'chat.working' : 'chat.send') }}
         </button>
       </form>
     </div>
@@ -297,6 +290,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.chat-mode { grid-column: 1 / -1; display: grid; gap: 4px; }
+.conclusion + .conclusion { margin-top: 16px; }
+.conclusion p { margin: 6px 0; }
+.conclusion blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid currentColor; }
+.conclusion small { display: block; opacity: 0.75; }
 .ai-chat-context {
   display: grid;
   gap: 8px;

@@ -11,7 +11,8 @@ A full-stack application for uploading PDF documents, extracting native or OCR t
 - Asynchronous text extraction with a database-backed worker
 - Adaptive Tesseract OCR for Russian, Kazakh, and English documents
 - Language detection, text metrics, chunking, and extraction-quality checks
-- Gemini summaries, content review, document Q&A, and visual layout review
+- Local Qwen document Q&A, evidence-backed analysis and improvement suggestions
+- Optional Gemini analysis or second review of verified protected copies
 - Local Presidio privacy detection with Kazakh IIN/BIN/IBAN, cards, RU/KK/EN NER, OCR, faces, signatures, QR codes, and barcodes
 - Verified protected-PDF workflow: confirmed redactions are rebuilt as an image-only PDF, automatically re-scanned, and only `ready_for_ai` artifacts can be uploaded to AI
 - Persistent protected-document AI jobs with explicit provider consent, structured page evidence, retries, cancellation, and remote-file cleanup
@@ -26,7 +27,8 @@ A full-stack application for uploading PDF documents, extracting native or OCR t
 
    Copy-Item .env.example .env
 
-2. Add `GEMINI_API_KEY` to `.env` if AI features are required.
+2. Start local Ollama using the setup below. Add `GEMINI_API_KEY` to `.env`
+   only if external analysis or an additional external review is required.
 
    Keep `GEMINI_SERVICE_TIER=unpaid` for the conservative default. The primary UI
    then allows external document analysis only through a verified protected copy.
@@ -86,6 +88,7 @@ Open a new PowerShell terminal:
 
 ollama --version
 ollama pull qwen3.5:4b
+ollama pull qwen3-embedding:0.6b
 ollama run qwen3.5:4b
 
 
@@ -103,7 +106,7 @@ For an initial laptop configuration, add these **Windows user environment
 variables** through "Edit environment variables for your account":
 
 ```dotenv
-OLLAMA_CONTEXT_LENGTH=8192
+OLLAMA_CONTEXT_LENGTH=16384
 OLLAMA_NUM_PARALLEL=1
 OLLAMA_NO_CLOUD=1
 ```
@@ -126,8 +129,13 @@ The response should list `qwen3.5:4b`.
 Ensure the project's `.env` contains these values (also provided in `.env.example`):
 
 ```dotenv
+AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 OLLAMA_MODEL=qwen3.5:4b
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
+OLLAMA_TIMEOUT_SECONDS=180
+OLLAMA_CONTEXT_LENGTH=16384
+SEMANTIC_SEARCH_ENABLED=true
 ```
 
 Both `api` and `analysis-worker` already use `env_file: .env` in Compose, so no
@@ -148,9 +156,56 @@ docker compose up -d --force-recreate api analysis-worker
 
 ### 4. Verify a model response from Docker
 
-Run this entire block in PowerShell from the project directory. It reads the
-container's environment without fallback values, checks the model list, and sends
-a real inference request using [Ollama's chat API](https://docs.ollama.com/api/chat):
+Run this block in PowerShell from the project directory. It uses the container's
+connection settings and sends a real inference request using
+[Ollama's chat API](https://docs.ollama.com/api/chat):
+
+```powershell
+docker compose exec api python -c "from app.services.ollama_provider import OllamaProvider; print(OllamaProvider().generate_text('Reply with: ready', max_output_tokens=20).text)"
+```
+
+### Document workflows
+
+- Chat always runs locally. Choose a question, whole-document text analysis, or
+  improvement suggestions. Each conclusion includes source quotes and page numbers
+  where available. Suggestions are labeled separately from document facts.
+- Questions use BM25 plus local multilingual embeddings with reciprocal-rank fusion.
+  If embeddings are unavailable, the answer discloses that only word search was used.
+  A bounded in-memory vector cache avoids repeatedly embedding the same chunks;
+  it is rebuilt after restart and does not require a database migration.
+- Whole-document chat analysis processes all extracted chunks in batches. Large
+  documents can take several minutes. Visual layout is assessed in the protected
+  document workflow, not inferred from chat text.
+- In Tools, a verified protected copy supports three modes: local analysis, local
+  analysis plus external review, or external analysis alone. Local is the default.
+  External modes require both existing consent checkboxes. Local failure never
+  causes an automatic cloud fallback.
+- Combined jobs save the local analysis before sending the protected copy and its
+  local draft for external review. The two analyses remain separate, including
+  disagreements. A cloud failure leaves the saved local result visible.
+- Quote matching checks the actual supplied text, preserving word order and
+  punctuation except Unicode/whitespace normalization. It is not an entailment
+  check: matching evidence does not prove a conclusion. OCR uncertainty and
+  unsupported numbers in chat conclusions are marked for review.
+- Local protected analysis processes text page by page; layout uses the configured
+  page sample. Coverage and result limits are disclosed. Cross-section consistency
+  needs separate review; neither model is treated as an authority.
+
+`AI_PROVIDER` selects the provider for the existing quick summary, text review and
+original-page layout endpoints. It does not override explicit protected job modes
+or route the local chat to the cloud. Existing external files are cleaned up using
+the provider stored on their jobs even after the default provider changes.
+
+Keep `OLLAMA_NO_CLOUD=1` in the Ollama server's Windows environment. The application
+accepts only localhost / Docker host Ollama URLs, rejects cloud model names, and
+disables HTTP proxies and redirects for local inference. No model name is displayed
+in the interface. Models remain server-side metadata for debugging and job identity.
+
+API additions: `POST /api/documents/{id}/ask` accepts `mode` (`question`, `analysis`,
+`suggestions`) and returns structured `conclusions`, `limitations`, `pages_reviewed`
+and `retrieval_method` alongside the existing answer fields. `POST /api/ai/jobs`
+accepts `processing_mode` (`local`, `review`, `external`), defaulting to `local`.
+Combined results include `external_review` separately from the primary local result.
 
 
 ## Local Development

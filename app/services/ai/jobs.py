@@ -21,6 +21,8 @@ from app.services.ai.document_analysis import (
     ProtectedDocumentAnalysisError,
     analyze_protected_document,
 )
+from app.services.ai.local_document import analyze_local_document
+from app.schemas.ai_analysis import ProtectedDocumentAnalysis
 from app.services.ai.provider import (
     AIDocument,
     AIProviderError,
@@ -31,8 +33,8 @@ from app.services.documents.artifacts import require_ai_ready_artifact
 from app.services.text_analysis import OCRExtractionError, extract_pdf_pages_with_ocr
 
 SessionFactory = Callable[[], Session]
-PROMPT_VERSION = "protected-v1"
-SCHEMA_VERSION = "analysis-v1"
+PROMPT_VERSION = "protected-v2"
+SCHEMA_VERSION = "analysis-v2"
 REMOTE_CLEANUP_WARNING = (
     "The external AI copy could not be deleted; use "
     "'delete external copy' to retry."
@@ -63,9 +65,10 @@ def enqueue_ai_analysis(
     user_id: int,
     payload: AIAnalysisJobCreate,
 ) -> AIAnalysisJob:
-    if not payload.consent_to_external_processing:
+    external = payload.processing_mode != "local"
+    if external and not payload.consent_to_external_processing:
         raise AIAnalysisConsentRequired("External AI processing consent is required")
-    if not payload.acknowledge_provider_data_terms:
+    if external and not payload.acknowledge_provider_data_terms:
         raise AIAnalysisConsentRequired("Provider data terms must be acknowledged")
 
     # Expired provider objects are no longer reusable and must not remain visible
@@ -73,11 +76,16 @@ def enqueue_ai_analysis(
     # lock remains held through the deduplicated insert below.
     reconcile_expired_remote_files(db, user_id=user_id)
     artifact = require_ai_ready_artifact(db, payload.artifact_id, user_id)
-    provider_name = settings.ai_provider
+    provider_name = {"local": "ollama", "review": "hybrid", "external": "gemini"}[payload.processing_mode]
+    if external:
+        get_ai_provider("gemini")
     service_tier = getattr(settings, "gemini_service_tier", "unpaid")
     requested_model = (
-        settings.gemini_model if provider_name.strip().lower() == "gemini" else None
+        settings.gemini_model if provider_name == "gemini" else settings.ollama_model
     )
+    if provider_name == "hybrid":
+        requested_model += "+" + settings.gemini_model
+    retention = payload.retention if external else "delete_after_analysis"
     dedupe_key = _build_dedupe_key(
         user_id=user_id,
         artifact_id=artifact.id,
@@ -86,7 +94,7 @@ def enqueue_ai_analysis(
         provider=provider_name,
         model=requested_model,
         service_tier=service_tier,
-        retention=payload.retention,
+        retention=retention,
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
     )
@@ -110,23 +118,25 @@ def enqueue_ai_analysis(
         model=requested_model,
         artifact_sha256=artifact.artifact_sha256,
         dedupe_key=dedupe_key,
-        retention=payload.retention,
+        retention=retention,
         prompt_version=PROMPT_VERSION,
         schema_version=SCHEMA_VERSION,
         consent_snapshot={
-            "external_processing": True,
-            "provider_data_terms_acknowledged": True,
+            "external_processing": external,
+            "provider_data_terms_acknowledged": external and payload.acknowledge_provider_data_terms,
+            "local_model": settings.ollama_model,
+            "external_model": settings.gemini_model,
             "provider": provider_name,
             "service_tier": service_tier,
             "artifact_id": artifact.id,
             "artifact_sha256": artifact.artifact_sha256,
             "artifact_policy_version": artifact.policy_version,
             "detector_version": artifact.detector_version,
-            "retention": payload.retention,
+            "retention": retention,
             "accepted_at": utc_now().isoformat(),
             **(
                 {"provider_terms_url": GEMINI_PROVIDER_TERMS_URL}
-                if provider_name.strip().lower() == "gemini"
+                if external
                 else {}
             ),
         },
@@ -308,7 +318,53 @@ def process_ai_job(
             if _stop_cancelled_job(db, job, provider):
                 return
 
-            provider = get_ai_provider()
+            if job.provider in {"ollama", "hybrid"}:
+                if job.consent_snapshot.get("local_model", settings.ollama_model) != settings.ollama_model:
+                    raise AIAnalysisJobError("Local model settings changed; start a new analysis")
+                if not job.result.get("local_analysis"):
+                    job.attempts += 1
+                    provider_attempt_recorded = True
+                    job.stage = "indexing_protected_copy"
+                    db.commit()
+
+                    def local_heartbeat(completed, total, _stage=None):
+                        if _stop_cancelled_job(db, job, provider):
+                            raise AIAnalysisJobError("Analysis cancelled")
+                        job.started_at = utc_now()
+                        job.progress = min(40, 5 + int(35 * completed / max(total, 1)))
+                        db.commit()
+
+                    local_texts = _page_texts(path, progress_callback=local_heartbeat)
+                    job.stage = "analyzing"
+                    db.commit()
+                    local_result = analyze_local_document(
+                        path, task=job.task, page_texts=local_texts, heartbeat=local_heartbeat,
+                    )
+                    if _stop_cancelled_job(db, job, provider):
+                        return
+                    job.result = {"local_analysis": local_result.model_dump(mode="json")}
+                    db.commit()
+                if job.provider == "ollama":
+                    job.result = job.result["local_analysis"]
+                    job.model = settings.ollama_model
+                    job.status = "completed"
+                    job.worker_active = False
+                    job.stage = "completed"
+                    job.progress = 100
+                    job.finished_at = utc_now()
+                    job.public_error = None
+                    job.private_error = None
+                    job.error_code = None
+                    db.commit()
+                    return
+
+            if not job.consent_snapshot.get("external_processing") or not job.consent_snapshot.get("provider_data_terms_acknowledged"):
+                raise AIAnalysisConsentRequired("External processing consent is required")
+            if job.consent_snapshot.get("service_tier") != settings.gemini_service_tier:
+                raise AIAnalysisConsentRequired("External processing terms changed; confirm a new analysis")
+            if job.consent_snapshot.get("external_model", settings.gemini_model) != settings.gemini_model:
+                raise AIAnalysisJobError("External model settings changed; start a new analysis")
+            provider = get_ai_provider("gemini")
             job.stage = "uploading"
             job.progress = 5
             db.commit()
@@ -408,10 +464,20 @@ def process_ai_job(
                 remote,
                 task=job.task,
                 page_texts=page_texts,
+                draft=(ProtectedDocumentAnalysis.model_validate(job.result["local_analysis"])
+                       if job.provider == "hybrid" else None),
             )
             if _stop_cancelled_job(db, job, provider):
                 return
-            job.result = result.model_dump(mode="json")
+            if job.provider == "hybrid":
+                job.result = {
+                    **job.result["local_analysis"],
+                    "external_review": result.model_dump(mode="json"),
+                    "review_note": "Дополнительная проверка — отдельное мнение. Сопоставьте выводы с цитатами; совпадение мнений не доказывает их правильность.",
+                }
+                model = settings.ollama_model + "+" + model
+            else:
+                job.result = result.model_dump(mode="json")
             job.model = model
             job.usage = usage or {}
             job.status = "completed"
@@ -461,7 +527,7 @@ def delete_remote_copy(db: Session, job: AIAnalysisJob) -> AIAnalysisJob:
         raise AIAnalysisJobsActive(
             "Cancel active AI analysis before deleting the external copy"
         )
-    provider = get_ai_provider()
+    provider = get_ai_provider("gemini" if job.provider == "hybrid" else job.provider)
     remote_name = job.provider_file_name
     try:
         provider.delete_document(remote_name)
@@ -545,20 +611,7 @@ def delete_ai_jobs_for_artifacts(db: Session, artifact_ids: list[int]) -> None:
                 "Cancel active AI analysis before deleting the protected artifact"
             )
     for provider_name, remote_name in remote_files:
-        if provider_name != settings.ai_provider:
-            _mark_remote_cleanup_failed_for_references(
-                db,
-                provider_name,
-                remote_name,
-                AIAnalysisJobError(
-                    f"AI provider '{provider_name}' is unavailable for remote cleanup"
-                ),
-            )
-            db.commit()
-            raise AIAnalysisJobError(
-                f"AI provider '{provider_name}' is unavailable for remote cleanup"
-            )
-        provider = get_ai_provider()
+        provider = get_ai_provider("gemini" if provider_name == "hybrid" else provider_name)
         try:
             provider.delete_document(remote_name)
         except AIProviderError as error:
@@ -580,12 +633,11 @@ def _reserve_provider_request(db: Session, job: AIAnalysisJob) -> bool:
     if db.get_bind().dialect.name == "postgresql":
         db.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:quota_key))"),
-            {"quota_key": f"protected-ai:{job.provider}:{job.model or ''}"},
+            {"quota_key": "protected-ai:gemini"},
         )
     last_request = db.scalar(
         select(func.max(AIAnalysisJob.provider_requested_at)).where(
-            AIAnalysisJob.provider == job.provider,
-            AIAnalysisJob.model == job.model,
+            AIAnalysisJob.provider.in_(["gemini", "hybrid"]),
         )
     )
     minimum_interval = max(
@@ -833,16 +885,8 @@ def _reconcile_stale_cancelled_jobs(db: Session, stale_before) -> None:
         stale_job.worker_active = False
         if not stale_job.provider_file_name:
             continue
-        if stale_job.provider != settings.ai_provider:
-            _record_remote_cleanup_failure(
-                stale_job,
-                AIAnalysisJobError(
-                    f"AI provider '{stale_job.provider}' is unavailable for remote cleanup"
-                ),
-            )
-            continue
         try:
-            provider = get_ai_provider()
+            provider = get_ai_provider("gemini" if stale_job.provider == "hybrid" else stale_job.provider)
         except Exception as error:
             _record_remote_cleanup_failure(stale_job, error)
             continue

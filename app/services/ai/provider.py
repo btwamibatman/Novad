@@ -97,12 +97,16 @@ class DocumentAIProvider(Protocol):
     ) -> AIGenerationResult: ...
 
 
-def get_ai_provider() -> DocumentAIProvider:
-    provider_name = settings.ai_provider.strip().lower()
+def get_ai_provider(provider_name: str | None = None) -> DocumentAIProvider:
+    provider_name = (provider_name or settings.ai_provider).strip().lower()
+    if provider_name == "ollama":
+        from app.services.ollama_provider import OllamaProvider
+
+        return OllamaProvider()
     if provider_name == "gemini":
         from app.services.gemini_provider import GeminiProvider
 
         return GeminiProvider()
     raise AIProviderNotConfigured(
-        f"AI provider '{settings.ai_provider}' is not configured"
+        f"AI provider '{provider_name}' is not configured"
     )

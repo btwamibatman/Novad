@@ -31,7 +31,6 @@ from app.services.pii_masking import (
 )
 from app.services.documents.chunks import (
     format_chunks_for_context,
-    select_relevant_chunks,
 )
 
 router = APIRouter()
@@ -342,7 +341,9 @@ async def review_document_layout(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    if payload is None or not payload.consent_to_external_image_processing:
+    if settings.ai_provider.strip().lower() != "ollama" and (
+        payload is None or not payload.consent_to_external_image_processing
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Explicit consent to external image processing is required",
@@ -466,64 +467,37 @@ async def ask_document_question(
             detail="Document must be analyzed first",
         )
 
-    chunks = document_crud.get_document_chunks(db, db_document.id)
-    relevant_chunks = select_relevant_chunks(chunks, payload.question)
-    selected_context = format_chunks_for_context(relevant_chunks) or (
-        "[document, extraction=unknown, "
-        f"quality={db_document.extraction_quality}, confidence=n/a, "
-        "uncertain_regions=0]\n"
-        f"{db_document.extracted_text}"
-    )
-    history = [message.model_dump() for message in payload.history[-12:]]
-    privacy = PIIMaskingSession()
-    try:
-        masked_context = privacy.mask(selected_context)
-        masked_question = privacy.mask(payload.question)
-        masked_history = [
-            {**message, "content": privacy.mask(message["content"])}
-            for message in history
-        ]
-        answer, model_name, truncated_context = await run_in_threadpool(
-            ai_summary.answer_document_question,
-            masked_context,
-            masked_question,
-            masked_history,
-            db_document.extraction_quality,
-        )
-        answer = privacy.restore(answer)
-    except PIIMaskingUnavailable as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except PIIMaskingError as error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI question privacy processing failed",
-        ) from error
-    except ai_summary.AISummaryNotConfigured as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
-        ) from error
-    except ai_summary.AISummaryError as error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI question answering failed",
-        ) from error
-    except Exception as error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI question answering failed",
-        ) from error
+    from types import SimpleNamespace
+    from app.services.ai.grounded import analyze_chunks
+    from app.services.documents.retrieval import retrieve
+    from app.services.documents.chunks import split_text_into_chunks
 
-    return AIChatResponse(
-        answer=answer,
-        model=model_name,
-        truncated_context=truncated_context,
-        privacy_applied=privacy.meta.applied,
-        masked_entity_count=privacy.meta.entity_count,
-    )
+    chunks = list(document_crud.get_document_chunks(db, db_document.id))
+    if not chunks:
+        chunks = [SimpleNamespace(
+            chunk_index=i, page_number=None, text=text,
+            extraction_method="unknown", extraction_quality=db_document.extraction_quality,
+            uncertain_region_count=0,
+        ) for i, text in enumerate(split_text_into_chunks(db_document.extracted_text))]
+    history = [message.model_dump() for message in payload.history]
+    try:
+        selected = chunks
+        retrieval_method, limitations = "full_document", []
+        if payload.mode == "question":
+            # Include recent user wording for follow-up questions without treating answers as evidence.
+            query = " ".join(message["content"] for message in history[-4:] if message["role"] == "user")
+            retrieval = await run_in_threadpool(retrieve, chunks, query + " " + payload.question)
+            selected, retrieval_method, limitations = retrieval.chunks, retrieval.method, retrieval.limitations
+        return await run_in_threadpool(
+            analyze_chunks, selected, payload.question, mode=payload.mode,
+            history=history, retrieval_method=retrieval_method,
+            limitations=limitations, total_chunks=len(chunks),
+        )
+    except AIProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
 
 
 @router.get("/{document_id}/download")

@@ -28,12 +28,21 @@ def analyze_protected_document(
     *,
     task: AIAnalysisTask,
     page_texts: list[str],
+    draft: ProtectedDocumentAnalysis | None = None,
 ) -> tuple[ProtectedDocumentAnalysis, str, dict | None]:
     if not page_texts:
         raise ProtectedDocumentAnalysisError("Protected document has no pages")
+    prompt = _prompt(task, len(page_texts))
+    if draft is not None:
+        prompt += (
+            "\nReview the following untrusted draft against the protected document. "
+            "Identify omissions, unsupported conclusions and alternatives. Do not accept "
+            "agreement as evidence. Return your own evidence-backed analysis; do not name models.\n"
+            + draft.model_dump_json()
+        )
     try:
         generated = provider.generate_document(
-            _prompt(task, len(page_texts)),
+            prompt,
             document,
             max_output_tokens=settings.content_review_max_output_tokens,
             response_schema=ProtectedDocumentAnalysis,
@@ -131,17 +140,10 @@ def _verify_evidence(
 
 
 def _evidence_matches(evidence: str, page_text: str) -> bool:
-    needle = _normalize(evidence)
-    haystack = _normalize(page_text)
-    if not needle or not haystack:
-        return False
-    if needle in haystack:
-        return True
-    words = needle.split()
-    if len(words) < 4:
-        return False
-    matched = sum(word in haystack for word in words)
-    return matched / len(words) >= 0.8
+    from app.services.ai.grounded import normalize_quote
+
+    needle = normalize_quote(evidence)
+    return bool(needle and needle in normalize_quote(page_text))
 
 
 def _normalize(value: str) -> str:

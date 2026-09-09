@@ -36,12 +36,13 @@ def read_ai_provider_info(
     model = (
         settings.gemini_model
         if settings.ai_provider.strip().lower() == "gemini"
-        else "configured"
+        else settings.ollama_model
     )
     return AIProviderInfo(
         provider=settings.ai_provider,
         model=model,
         service_tier=settings.gemini_service_tier,
+        external_review_available=bool(settings.gemini_api_key),
     )
 
 
@@ -95,6 +96,11 @@ async def create_ai_job(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
+        ) from error
+    except AIProviderNotConfigured as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="External analysis is not configured",
         ) from error
     except ArtifactNotFoundError as error:
         raise HTTPException(

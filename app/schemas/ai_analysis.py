@@ -79,6 +79,7 @@ class AIAnalysisJobCreate(BaseModel):
     retention: AIFileRetention = "delete_after_analysis"
     consent_to_external_processing: bool = False
     acknowledge_provider_data_terms: bool = False
+    processing_mode: Literal["local", "review", "external"] = "local"
 
 
 class AIProviderInfo(BaseModel):
@@ -87,6 +88,8 @@ class AIProviderInfo(BaseModel):
     service_tier: Literal["unpaid", "paid"]
     max_remote_retention_hours: int = 48
     requires_verified_artifact: bool = True
+    local_processing: bool = True
+    external_review_available: bool = False
 
 
 class AIAnalysisJobRead(BaseModel):

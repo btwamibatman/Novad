@@ -17,7 +17,13 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = 15
     session_cleanup_interval_seconds: int = 900
     session_storage_quota_bytes: int = 500 * 1024 * 1024
-    ai_provider: str = "gemini"
+    ai_provider: str = "ollama"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen3.5:4b"
+    ollama_embedding_model: str = "qwen3-embedding:0.6b"
+    ollama_timeout_seconds: int = Field(default=180, ge=1, le=240)
+    ollama_context_length: int = Field(default=16384, ge=4096)
+    semantic_search_enabled: bool = True
     gemini_api_key: str | None = Field(default=None, repr=False)
     gemini_model: str = "gemini-2.5-flash"
     gemini_thinking_budget: int = 0
@@ -60,6 +66,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
+        from urllib.parse import urlparse
+
+        local_url = urlparse(self.ollama_base_url)
+        if (
+            local_url.scheme != "http"
+            or local_url.hostname not in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+            or local_url.username or local_url.password
+            or local_url.path not in {"", "/"} or local_url.query or local_url.fragment
+        ):
+            raise ValueError("OLLAMA_BASE_URL must point to local Ollama over HTTP")
+        if not self.ollama_model.strip() or "cloud" in self.ollama_model.lower():
+            raise ValueError("OLLAMA_MODEL must be a local model")
+        if not self.ollama_embedding_model.strip() or "cloud" in self.ollama_embedding_model.lower():
+            raise ValueError("OLLAMA_EMBEDDING_MODEL must be a local model")
         if not self.allowed_host_list:
             raise ValueError("ALLOWED_HOSTS must contain at least one host")
         if any("://" in host or "/" in host for host in self.allowed_host_list):

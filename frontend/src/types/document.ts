@@ -71,11 +71,24 @@ export interface DashboardSummary {
 export interface AIChatMessage {
   role: 'user' | 'assistant'
   content: string
+  conclusions?: DocumentConclusion[]
+  limitations?: string[]
+  pages_reviewed?: number[]
+}
+
+export type AIChatMode = 'question' | 'analysis' | 'suggestions'
+
+export interface DocumentConclusion {
+  observation: string
+  suggestion: string
+  requires_review: boolean
+  citations: { chunk_index: number; quote: string; page: number | null; text_matched: boolean }[]
 }
 
 export interface AIChatRequest {
   question: string
   history: AIChatMessage[]
+  mode?: AIChatMode
 }
 
 export interface AIChatResponse {
@@ -84,6 +97,10 @@ export interface AIChatResponse {
   truncated_context: boolean
   privacy_applied: boolean
   masked_entity_count: number
+  conclusions?: DocumentConclusion[]
+  limitations?: string[]
+  pages_reviewed?: number[]
+  retrieval_method?: string
 }
 
 export type ToolJobStatus = 'pending' | 'running' | 'review' | 'completed' | 'failed'
@@ -245,6 +262,9 @@ export interface ProtectedDocumentAnalysis {
   key_points: AIAnalysisKeyPoint[]
   findings: AIAnalysisFinding[]
   coverage: AIAnalysisCoverage
+  external_review?: ProtectedDocumentAnalysis
+  local_analysis?: ProtectedDocumentAnalysis
+  review_note?: string
 }
 
 export interface AIAnalysisJobRead {
@@ -279,6 +299,7 @@ export interface AIAnalysisJobCreate {
   retention: AIFileRetention
   consent_to_external_processing: boolean
   acknowledge_provider_data_terms: boolean
+  processing_mode?: 'local' | 'review' | 'external'
 }
 
 export interface AIProviderInfo {
@@ -287,4 +308,6 @@ export interface AIProviderInfo {
   service_tier: 'unpaid' | 'paid'
   max_remote_retention_hours: number
   requires_verified_artifact: boolean
+  local_processing?: boolean
+  external_review_available?: boolean
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { RouterView } from 'vue-router'
 
 import AIChatWindow from '@/components/chat/AIChatWindow.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
@@ -8,17 +8,17 @@ import { useDocumentPolling } from '@/composables/useDocumentPolling'
 import AppHeader from './AppHeader.vue'
 
 const { handle } = useApiErrorHandler()
-const route = useRoute()
-const documentsPage = computed(() => route.name === 'documents')
+const chatWindow = ref<InstanceType<typeof AIChatWindow> | null>(null)
+const chatOpen = ref(false)
 
 useDocumentPolling((error) => handle(error))
 </script>
 
 <template>
   <div class="shell">
-    <AppHeader />
+    <AppHeader :chat-open="chatOpen" @open-chat="chatWindow?.openChat()" />
     <RouterView />
   </div>
 
-  <AIChatWindow v-if="documentsPage" />
+  <AIChatWindow ref="chatWindow" @update:open="chatOpen = $event" />
 </template>

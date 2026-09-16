@@ -41,27 +41,27 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #e9eef5;
-  --surface: #ffffff;
-  --surface-2: #f2f5f9;
-  --surface-hover: #e2e8f1;
-  --border: #c5cfdd;
-  --border-soft: #d8e0ea;
-  --text: #111827;
-  --text-soft: #4f5b6d;
-  --muted: #768297;
-  --accent: #2563eb;
-  --accent-2: #1d4ed8;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --accent-soft: rgba(37, 99, 235, 0.15);
-  --success: #16833a;
-  --success-soft: rgba(22, 131, 58, 0.12);
-  --warning: #a16207;
-  --warning-soft: rgba(161, 98, 7, 0.12);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.1);
-  --shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+  --bg: #eef2f5;
+  --surface: #fdfefd;
+  --surface-2: #f3f5f7;
+  --surface-hover: #e5ebf1;
+  --border: #bac5d1;
+  --border-soft: #d6dee6;
+  --text: #202c3b;
+  --text-soft: #475569;
+  --muted: #59687a;
+  --accent: #285ea8;
+  --accent-2: #204d8c;
+  --primary: #285ea8;
+  --primary-hover: #204d8c;
+  --accent-soft: #e7eff9;
+  --success: #21643d;
+  --success-soft: #e8f3eb;
+  --warning: #805214;
+  --warning-soft: #faf0da;
+  --danger: #b12e35;
+  --danger-soft: #faeaeb;
+  --shadow: 0 8px 24px rgba(32, 44, 59, 0.06);
 }
 
 * {
@@ -77,6 +77,10 @@ body {
   font-size: var(--font-size-body);
   line-height: 1.5;
   letter-spacing: 0;
+}
+
+:root[data-theme="light"] body {
+  background: linear-gradient(135deg, #f5f6f4 0%, var(--bg) 55%, #eaf0f6 100%);
 }
 
 :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
@@ -632,19 +636,24 @@ tbody tr[data-document-id]:hover {
   gap: 4px;
 }
 
-.main-nav a {
+.main-nav a,
+.main-nav button {
+  border: 0;
+  background: transparent;
   border-radius: 7px;
   color: var(--text-soft);
   padding: 9px 12px;
   text-decoration: none;
 }
 
-.main-nav a:hover {
+.main-nav a:hover,
+.main-nav button:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.main-nav a.router-link-active {
+.main-nav a.router-link-active,
+.main-nav button.router-link-active {
   background: var(--accent-soft);
   color: var(--text);
   box-shadow: inset 0 -2px 0 var(--accent);
@@ -1272,15 +1281,15 @@ tbody tr[data-document-id]:hover {
 .ai-chat-body {
   display: grid;
   flex: 1 1 auto;
-  grid-template-rows: auto minmax(220px, 1fr) auto;
+  grid-template-rows: auto minmax(120px, 1fr) auto;
   gap: 10px;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   padding: 14px;
 }
 
 .ai-chat-messages {
-  min-height: 220px;
+  min-height: 120px;
   max-height: 330px;
   overflow: auto;
   border: 1px solid var(--border-soft);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { DocumentRead } from '../src/types/document'
-import en from '../src/i18n/en.json'
+import en from '../src/i18n/en.json' with { type: 'json' }
 
 const session = {
   session_id: 'test-session',
@@ -249,6 +249,52 @@ test('analysis, AI reviews and chat retain their behavior', async ({ page }) => 
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.getByText('Question')).toBeVisible()
   await expect(page.getByText('AI answer')).toBeVisible()
+})
+
+test('chat navigation preserves processing, exposes errors and retries on desktop and mobile', async ({ page }, testInfo) => {
+  await installMockApi(page, true)
+  await page.addInitScript(() => localStorage.setItem('document-console-theme', 'light'))
+  await page.route('**/api/tools/jobs', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/tools/artifacts', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/ai/jobs', (route) => route.fulfill({ json: [] }))
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  const requests: unknown[] = []
+  await page.route('**/api/documents/1/ask', async (route) => {
+    requests.push(route.request().postDataJSON())
+    if (requests.length === 1) {
+      await pending
+      await route.fulfill({ status: 503, json: { detail: 'Local AI timed out. Please retry.' } })
+    } else {
+      await route.fulfill({ json: { answer: 'The task is complete.', model: 'test', truncated_context: false } })
+    }
+  })
+  await page.goto('/documents')
+  await page.getByRole('navigation').getByRole('button', { name: 'AI chat', exact: true }).click()
+  await page.getByPlaceholder('Ask about the selected document...').fill('Evaluate the task')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  const popup = page.locator('.ai-chat-popup')
+  await expect(popup.getByRole('status')).toContainText('Processing your request')
+  await expect(popup.getByRole('button', { name: 'Processing…', exact: true })).toBeDisabled()
+  await page.screenshot({ path: testInfo.outputPath('chat-processing-desktop.png') })
+  await page.getByRole('button', { name: 'Close AI chat', exact: true }).click()
+  await page.getByRole('link', { name: 'Tools', exact: true }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'AI chat', exact: true }).click()
+  await expect(popup.getByRole('status')).toContainText('Processing your request')
+  release()
+  await expect(popup.getByRole('alert')).toContainText('Local AI timed out.')
+  await page.screenshot({ path: testInfo.outputPath('chat-error-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  const popupBounds = await popup.boundingBox()
+  const sendBounds = await popup.getByRole('button', { name: 'Send', exact: true }).boundingBox()
+  expect(sendBounds!.y + sendBounds!.height).toBeLessThanOrEqual(popupBounds!.y + popupBounds!.height)
+  await page.screenshot({ path: testInfo.outputPath('chat-error-mobile.png') })
+  await popup.getByRole('button', { name: 'Retry request' }).click()
+  await expect(popup.getByRole('status')).toHaveText('Answer ready')
+  await expect(popup.locator('.ai-chat-message.user')).toHaveCount(1)
+  await expect(popup.locator('.ai-chat-message.assistant')).toHaveText('The task is complete.')
+  expect(requests[1]).toEqual(requests[0])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
 test('upload and delete update the document list', async ({ page }) => {

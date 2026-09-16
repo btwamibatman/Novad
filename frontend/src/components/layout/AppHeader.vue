@@ -14,6 +14,8 @@ const authStore = useAuthStore()
 const documentsStore = useDocumentsStore()
 const { show } = useToasts()
 const loggingOut = ref(false)
+defineProps<{ chatOpen?: boolean }>()
+defineEmits<{ 'open-chat': [] }>()
 
 async function logout(): Promise<void> {
   loggingOut.value = true
@@ -38,6 +40,7 @@ async function logout(): Promise<void> {
       <nav class="main-nav" :aria-label="t('nav.label')">
         <RouterLink to="/documents">{{ t('nav.documents') }}</RouterLink>
         <RouterLink to="/tools">{{ t('nav.tools') }}</RouterLink>
+        <button type="button" :class="{ 'router-link-active': chatOpen }" :aria-expanded="chatOpen" @click="$emit('open-chat')">{{ t('nav.chat') }}</button>
       </nav>
     </div>
     <div class="actions header-actions">

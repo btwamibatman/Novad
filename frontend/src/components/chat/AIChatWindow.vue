@@ -22,6 +22,7 @@ interface DragState {
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const chat = useDocumentChat()
+const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const popup = ref<HTMLElement | null>(null)
 const dragHandle = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
@@ -112,6 +113,15 @@ async function toggleOpen(): Promise<void> {
   }
 }
 
+async function openChat(): Promise<void> {
+  chat.open.value = true
+  await nextTick()
+  input.value?.focus()
+}
+
+defineExpose({ openChat })
+watch(chat.open, (value) => emit('update:open', value))
+
 function changeDocument(event: Event): void {
   chat.abortRequest()
   const value = Number((event.target as HTMLSelectElement).value)
@@ -136,7 +146,7 @@ function stopDragOnBlur(): void {
 }
 
 watch(
-  () => chat.messages.value,
+  () => [chat.messages.value, chat.status.value],
   async () => {
     await nextTick()
     if (messageList.value) {
@@ -253,8 +263,24 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>{{ message.content }}</template>
         </div>
+        <div v-if="chat.status.value === 'processing'" class="chat-status" role="status">
+          <span class="chat-spinner" aria-hidden="true"></span>
+          <div>
+            <strong>{{ t('chat.processing') }}</strong>
+            <p aria-live="off">{{ t('chat.elapsed', { seconds: chat.elapsedSeconds.value }) }}</p>
+            <p>{{ t(chat.elapsedSeconds.value >= 20 ? 'chat.slow_request' : 'chat.processing_help') }}</p>
+          </div>
+        </div>
+        <div v-else-if="chat.status.value === 'error'" class="chat-status chat-error" role="alert">
+          <div>
+            <strong>{{ t('chat.failed') }}</strong>
+            <p>{{ chat.errorMessage.value }}</p>
+            <button class="button small" type="button" @click="chat.retry">{{ t('chat.retry') }}</button>
+          </div>
+        </div>
+        <p v-else-if="chat.status.value === 'success'" class="chat-complete" role="status">{{ t('chat.completed') }}</p>
       </div>
-      <form class="ai-chat-form" @submit.prevent="submit">
+      <form class="ai-chat-form" :aria-busy="chat.asking.value" @submit.prevent="submit">
         <label class="chat-mode">
           {{ t('chat.mode_label') }}
           <select v-model="mode" class="select" :disabled="disabled">
@@ -273,7 +299,7 @@ onBeforeUnmount(() => {
           :placeholder="t('chat.placeholder')"
           :disabled="disabled"
         ></textarea>
-        <button class="button primary" type="submit" :disabled="disabled">
+        <button class="button primary" type="submit" :disabled="disabled || (mode === 'question' && !question.trim())">
           {{ t(chat.asking.value ? 'chat.working' : 'chat.send') }}
         </button>
       </form>
@@ -290,6 +316,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.chat-status { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+.chat-status p { margin: 4px 0 8px; }
+.chat-error { border-color: var(--danger); }
+.chat-error strong { color: var(--danger); }
+.chat-complete { color: var(--text-soft); margin: 8px 0 0; font-size: var(--font-size-small); }
+.chat-spinner { width: 18px; height: 18px; flex: 0 0 auto; margin-top: 2px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .chat-mode { grid-column: 1 / -1; display: grid; gap: 4px; }
 .conclusion + .conclusion { margin-top: 16px; }
 .conclusion p { margin: 6px 0; }

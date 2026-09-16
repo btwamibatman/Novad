@@ -33,6 +33,10 @@ def _cosine(left, right) -> float:
 def retrieve(chunks: list[ChunkLike], question: str, *, top_k: int = 5) -> RetrievalResult:
     if not chunks:
         return RetrievalResult([], "bm25", [])
+    # Ranking cannot change the selected context when every chunk fits.
+    # Avoid loading the embedding model and embedding the query unnecessarily.
+    if len(chunks) <= top_k:
+        return RetrievalResult(sorted(chunks, key=lambda c: c.chunk_index), "full_document", [])
     terms = [Counter(_tokens(chunk.text)) for chunk in chunks]
     query = set(_tokens(question))
     lengths = [sum(row.values()) for row in terms]

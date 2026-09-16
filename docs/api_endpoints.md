@@ -196,7 +196,8 @@ FastAPI returns HTTP 422 with validation details when path parameters or request
 
 All tool operations are user-scoped and processed by the local worker.
 
-- `GET /api/tools/jobs` — list recent tool jobs.
+- `GET /api/tools/jobs` — list the latest 50 tool jobs plus all unfinished jobs, including protected-copy verification. Each job includes `hidden_from_history`; hidden jobs remain accessible for workspace restoration and downloads.
+- `PATCH /api/tools/jobs/{job_id}/history` — set `{"hidden": true}` to hide a finished task from history, or `{"hidden": false}` to restore it. Does not delete files. Returns `409` while the task or protected-copy verification is unfinished.
 - `POST /api/tools/compress` — queue PDF compression (`low`, `recommended`, `extreme`).
 - `POST /api/tools/word-to-pdf` — upload DOCX, DOC, or ODT and queue PDF conversion.
 - `POST /api/tools/pdf-to-word` — queue editable DOCX creation with OCR fallback.

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { makeDocument } from '../src/__tests__/fixtures'
 import type { DocumentRead, ToolJobRead } from '../src/types/document'
-import en from '../src/i18n/en.json'
+import en from '../src/i18n/en.json' with { type: 'json' }
 
 const reviewDirectory = resolve(import.meta.dirname, '../../artifacts/ui-review')
 const longFilename = 'Отчёт_по_производственной_практике_и_индивидуальным_заданиям_Абдигалым_Хамза_2026_окончательная_версия.pdf'
@@ -56,7 +56,7 @@ async function mockApi(page: Page, overrides: Partial<MockState> = {}) {
     failLogin: false, failUpload: false, failList: false, listGate: null, calls: [],
     ...overrides,
   }
-  await page.route('**/api/**', async (route) => {
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     if (request.method() === 'POST') {
@@ -89,6 +89,11 @@ async function mockApi(page: Page, overrides: Partial<MockState> = {}) {
       }
     } else if (path === '/api/tools/jobs') {
       await route.fulfill({ json: state.jobs })
+    } else if (/\/api\/tools\/jobs\/\d+\/history$/.test(path)) {
+      const id = Number(path.split('/')[4])
+      const current = state.jobs.find((item) => item.id === id)!
+      current.hidden_from_history = request.postDataJSON().hidden
+      await route.fulfill({ json: current })
     } else if (path === '/api/tools/artifacts' || path === '/api/ai/jobs') {
       await route.fulfill({ json: [] })
     } else if (path === '/api/ai/provider-info') {
@@ -312,4 +317,77 @@ test('desktop and narrow layouts keep long filenames and task results readable',
   await screenshot(page, 'tools-compression-desktop')
   await page.getByRole('button', { name: 'RUS', exact: true }).click()
   await screenshot(page, 'tools-compression-desktop-ru')
+})
+
+test('redaction editor draws, moves, deletes and restores boxes without excluded overlays', async ({ page }) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('/web/dist/')
+  await page.getByRole('link', { name: 'Tools', exact: true }).click()
+  await page.getByRole('button', { name: 'Find data', exact: true }).click()
+  const boxes = page.locator('.finding-overlay')
+  await expect(boxes).toHaveCount(1)
+  await expect(page.locator('.resize-handle')).toHaveCount(0)
+  await page.locator('.redaction-preview').scrollIntoViewIfNeeded()
+  const bounds = (await page.locator('.redaction-preview').boundingBox())!
+  async function draw() {
+    await page.mouse.move(bounds.x + bounds.width * 0.55, bounds.y + bounds.height * 0.4)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + bounds.width * 0.8, bounds.y + bounds.height * 0.5, { steps: 5 })
+    await page.mouse.up()
+  }
+  await draw()
+  await expect(boxes).toHaveCount(2)
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(boxes).toHaveCount(1)
+  await page.getByRole('button', { name: 'Draw area', exact: true }).click()
+  // The toolbar can scroll into view, so align the preview before drawing again.
+  await page.locator('.redaction-preview').scrollIntoViewIfNeeded()
+  Object.assign(bounds, (await page.locator('.redaction-preview').boundingBox())!)
+  await draw()
+  await expect(boxes).toHaveCount(2)
+  await expect(page.getByRole('button', { name: 'Draw area', exact: true })).toHaveAttribute('aria-pressed', 'false')
+  const added = boxes.nth(1)
+  const originalStyle = await added.getAttribute('style')
+  const area = (await added.boundingBox())!
+  await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(area.x + area.width / 2 + 35, area.y + area.height / 2 + 20, { steps: 5 })
+  await page.mouse.up()
+  expect(await added.getAttribute('style')).not.toBe(originalStyle)
+  await page.keyboard.press('Control+z')
+  await expect(added).toHaveAttribute('style', originalStyle!)
+  await added.click()
+  await page.keyboard.press('Delete')
+  await expect(boxes).toHaveCount(1)
+  await expect(page.locator('.finding-overlay.excluded')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(boxes).toHaveCount(2)
+  await boxes.nth(1).click()
+  await screenshot(page, 'tools-editor-desktop')
+  await page.getByRole('button', { name: 'RUS', exact: true }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoPageOverflow(page)
+  await screenshot(page, 'tools-editor-mobile-ru')
+})
+
+test('tool history limits finished tasks and remembers hidden entries after reload', async ({ page }) => {
+  const finished = Array.from({ length: 8 }, (_, index) => job({ id: 100 + index }))
+  await mockApi(page, { jobs: [...finished, job({ id: 99, status: 'running', result_filename: null })] })
+  await page.goto('/web/dist/')
+  await page.getByRole('link', { name: 'Tools', exact: true }).click()
+  await expect(page.locator('.task-row')).toHaveCount(6)
+  await expect(page.locator('.task-row').first()).toHaveAttribute('data-job-id', '99')
+  await page.getByRole('button', { name: 'Show more', exact: true }).click()
+  await expect(page.locator('.task-row')).toHaveCount(9)
+  await page.locator('[data-job-id="100"]').getByRole('button', { name: 'Hide from history' }).click()
+  await expect(page.locator('[data-job-id="100"]')).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('[data-job-id="100"]')).toHaveCount(0)
+  await page.getByLabel('Show hidden').check()
+  await expect(page.locator('[data-job-id="100"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Restore to history' }).click()
+  await page.getByLabel('Show hidden').uncheck()
+  await expect(page.locator('[data-job-id="100"]')).toBeVisible()
+  await screenshot(page, 'tools-history-desktop')
 })

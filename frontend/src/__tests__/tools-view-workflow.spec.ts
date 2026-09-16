@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   redactionPreview: vi.fn(),
   applyRedaction: vi.fn(),
   wordToPdf: vi.fn(),
+  setJobHidden: vi.fn(),
   routeQuery: {} as Record<string, string | undefined>,
 }))
 
@@ -31,6 +32,7 @@ vi.mock('@/api/tools', () => ({
     redactionPreview: mocks.redactionPreview,
     applyRedaction: mocks.applyRedaction,
     wordToPdf: mocks.wordToPdf,
+    setJobHidden: mocks.setJobHidden,
     pagePreviewUrl: (jobId: number, page: number) => `/api/tools/jobs/${jobId}/pages/${page}`,
     downloadUrl: (jobId: number) => `/api/tools/jobs/${jobId}/download`,
   },
@@ -315,6 +317,137 @@ describe('ToolsView protected workflow restoration', () => {
     const area = wrapper.findAll('.finding-overlay')[1]!
     await area.get('.resize-se').trigger('keydown', { key: 'ArrowRight' })
     expect(area.attributes('style')).toContain('width: 26%')
+    wrapper.unmount()
+  })
+
+  it('deletes a box completely, restores it with undo and submits only remaining boxes', async () => {
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    mocks.applyRedaction.mockResolvedValue({ ...reviewJob(), status: 'pending' })
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    expect(wrapper.findAll('.resize-handle')).toHaveLength(0)
+    await wrapper.get('.finding-list-row .button').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(0)
+    expect(wrapper.findAll('.finding-list-row')).toHaveLength(0)
+    expect(wrapper.get('.apply-bar .primary').attributes('disabled')).toBeDefined()
+    await wrapper.get('.undo-area').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(1)
+    await wrapper.get('.add-area').trigger('click')
+    await wrapper.findAll('.finding-list-row')[0]!.get('.button').trigger('click')
+    await wrapper.get('.apply-bar .primary').trigger('click')
+    await flushPromises()
+    const submitted = mocks.applyRedaction.mock.calls[0]![1]
+    expect(submitted).toHaveLength(1)
+    expect(submitted[0].id).toMatch(/^manual-/)
+    wrapper.unmount()
+  })
+
+  it('draws freely and through the draw button, moves boxes and undoes edits', async () => {
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    const preview = wrapper.get('.redaction-preview')
+    vi.spyOn(preview.element, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, toJSON: () => ({}),
+    })
+    async function dragEmpty() {
+      preview.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 700, clientY: 600 }))
+      window.dispatchEvent(new MouseEvent('pointerup'))
+      await flushPromises()
+    }
+    preview.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await flushPromises()
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(1)
+    await dragEmpty()
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(2)
+    await wrapper.get('.undo-area').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(1)
+    await wrapper.get('.draw-area').trigger('click')
+    await dragEmpty()
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(2)
+    expect(wrapper.get('.draw-area').attributes('aria-pressed')).toBe('false')
+    const added = wrapper.findAll('.finding-overlay')[1]!
+    expect(added.attributes('style')).toContain('left: 50%')
+    added.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 600, clientY: 550 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 1100, clientY: 1100 }))
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await flushPromises()
+    expect(added.attributes('style')).toContain('left: 80%')
+    expect(added.attributes('style')).toContain('top: 90%')
+    await wrapper.get('.undo-area').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')[1]!.attributes('style')).toContain('left: 50%')
+    await wrapper.get('.undo-area').trigger('click')
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('cancels unfinished drawing and resizing with Escape', async () => {
+    mocks.listJobs.mockResolvedValue([reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    const preview = wrapper.get('.redaction-preview')
+    vi.spyOn(preview.element, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, toJSON: () => ({}),
+    })
+    await wrapper.get('.draw-area').trigger('click')
+    preview.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 700, clientY: 600 }))
+    await preview.trigger('keydown', { key: 'Escape' })
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await flushPromises()
+    expect(wrapper.findAll('.finding-overlay')).toHaveLength(1)
+    await wrapper.get('.finding-select').trigger('click')
+    wrapper.get('.resize-se').element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 400, clientY: 250 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 800, clientY: 600 }))
+    await preview.trigger('keydown', { key: 'Escape' })
+    expect(wrapper.get('.finding-overlay').attributes('style')).toContain('width: 30%')
+    expect(wrapper.get('.undo-area').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('shows active jobs first, limits history and filters completed jobs by document', async () => {
+    const completed = Array.from({ length: 7 }, (_, index) => ({
+      ...reviewJob(), id: 100 + index, status: 'completed' as const,
+      source_document_id: index === 0 ? 8 : 7,
+    }))
+    mocks.listJobs.mockResolvedValue([...completed, reviewJob()])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    expect(wrapper.findAll('.task-row')).toHaveLength(6)
+    expect(wrapper.findAll('.task-row')[0]!.attributes('data-job-id')).toBe('41')
+    await wrapper.get('.history-more').trigger('click')
+    expect(wrapper.findAll('.task-row')).toHaveLength(8)
+    await wrapper.get('.history-controls select').setValue('document')
+    expect(wrapper.findAll('.task-row')).toHaveLength(6)
+    expect(wrapper.find('[data-job-id="100"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('persists hiding a finished job and can restore it from hidden history', async () => {
+    const finished = { ...reviewJob(), status: 'completed' as const }
+    mocks.listJobs.mockResolvedValue([finished])
+    mocks.listArtifacts.mockResolvedValue([])
+    mocks.setJobHidden.mockImplementation(async (_, hidden) => ({ ...finished, hidden_from_history: hidden }))
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+    await wrapper.get('.history-hide').trigger('click')
+    await flushPromises()
+    expect(mocks.setJobHidden).toHaveBeenCalledWith(41, true)
+    expect(wrapper.find('.task-row').exists()).toBe(false)
+    await wrapper.get('.history-controls input').setValue(true)
+    expect(wrapper.find('.task-row').exists()).toBe(true)
+    await wrapper.get('.history-hide').trigger('click')
+    await flushPromises()
+    expect(mocks.setJobHidden).toHaveBeenCalledWith(41, false)
+    expect(wrapper.find('.task-row').exists()).toBe(false)
+    await wrapper.get('.history-controls input').setValue(false)
+    expect(wrapper.find('.task-row').exists()).toBe(true)
     wrapper.unmount()
   })
 })

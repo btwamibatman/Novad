@@ -12,6 +12,13 @@ export const toolsApi = {
   listJobs(): Promise<ToolJobRead[]> {
     return requestJson('/api/tools/jobs')
   },
+  setJobHidden(jobId: number, hidden: boolean): Promise<ToolJobRead> {
+    return requestJson(`/api/tools/jobs/${jobId}/history`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hidden }),
+    })
+  },
   listArtifacts(): Promise<DocumentArtifactRead[]> {
     return requestJson('/api/tools/artifacts')
   },

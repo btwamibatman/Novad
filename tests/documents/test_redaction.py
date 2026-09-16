@@ -328,6 +328,72 @@ def test_empty_ocr_on_non_empty_page_is_not_treated_as_complete(tmp_path, monkey
 # PDF sanitization and flattening
 
 
+@pytest.mark.parametrize("mode", ["black", "pseudonymize"])
+def test_apply_compacts_missing_xrefs_before_scrubbing(tmp_path, monkeypatch, mode):
+    source = tmp_path / "sparse-xref.pdf"
+    destination = tmp_path / "protected.pdf"
+    with pymupdf.open() as document:
+        document.get_new_xref()  # Leave an unused object at xref 3.
+        document.new_page().insert_text((72, 72), "secret@example.com")
+        document.set_metadata({"title": "private-title"})
+        document.save(source)
+    original_bytes = source.read_bytes()
+    original_xref_object = pymupdf.Document.xref_object
+
+    def strict_xref_object(document, xref, *args, **kwargs):
+        value = original_xref_object(document, xref, *args, **kwargs)
+        # Reproduce the worker's MuPDF error on missing objects. Some builds
+        # return "null" instead, so make this regression portable across builds.
+        if value == "null":
+            raise RuntimeError(f"code=7: cannot find object in xref ({xref} 0 R)")
+        return value
+
+    monkeypatch.setattr(pymupdf.Document, "xref_object", strict_xref_object)
+    with pymupdf.open(source) as document:
+        with pytest.raises(RuntimeError, match="cannot find object in xref"):
+            document.scrub()
+
+    meta = apply_redactions(source, destination, [{
+        "id": "email", "page": 1, "pdf_rect": [65, 50, 260, 85],
+        "category": "EMAIL", "text": "secret@example.com",
+    }], {"email"}, mode)
+
+    assert source.read_bytes() == original_bytes
+    assert meta["sanitized"] is True
+    assert meta["flattened"] is True
+    with pymupdf.open(destination) as protected:
+        assert protected.page_count == 1
+        assert protected.metadata.get("title", "") == ""
+        assert protected[0].get_text().strip() == ""
+        if mode == "black":
+            pixmap = protected[0].get_pixmap(clip=pymupdf.Rect(80, 65, 85, 70), alpha=False)
+            assert max(pixmap.samples) < 20
+    structure, coverage, _ = _inspect_pdf(destination, None)
+    assert structure["unsafe_item_count"] == 0
+    assert coverage["verification_completed"] is True
+
+
+def test_apply_still_fails_closed_on_scrub_error(tmp_path, monkeypatch):
+    source = tmp_path / "source.pdf"
+    destination = tmp_path / "protected.pdf"
+    with pymupdf.open() as document:
+        document.new_page().insert_text((72, 72), "secret@example.com")
+        document.save(source)
+
+    def fail_scrub(*args, **kwargs):
+        raise RuntimeError("Unexpected cleanup failure")
+
+    monkeypatch.setattr(pymupdf.Document, "scrub", fail_scrub)
+    with pytest.raises(RedactionError) as caught:
+        apply_redactions(source, destination, [{
+            "id": "email", "page": 1, "pdf_rect": [65, 50, 260, 85],
+            "category": "EMAIL", "text": "secret@example.com",
+        }], {"email"}, "black")
+
+    assert str(caught.value.__cause__) == "Unexpected cleanup failure"
+    assert not destination.exists()
+
+
 def test_apply_removes_annotations_widgets_and_bookmarks(tmp_path):
     source = tmp_path / "interactive.pdf"
     destination = tmp_path / "protected.pdf"

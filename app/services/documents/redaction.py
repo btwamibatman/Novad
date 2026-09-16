@@ -593,21 +593,26 @@ def apply_redactions(
             if progress:
                 progress(85, "sanitizing")
             _remove_interactive_content(document)
-            document.scrub(
-                attached_files=True,
-                clean_pages=True,
-                embedded_files=True,
-                hidden_text=True,
-                javascript=True,
-                metadata=True,
-                redactions=False,
-                remove_links=True,
-                reset_fields=True,
-                reset_responses=True,
-                thumbnails=True,
-                xml_metadata=True,
-            )
-            flatten_meta = _save_flattened_pdf(document, destination, progress)
+            # scrub() visits every xref, including unused entries left by the
+            # source PDF or removed annotations. Compact the working copy first.
+            with pymupdf.open(
+                stream=document.tobytes(garbage=4, deflate=True), filetype="pdf",
+            ) as sanitized:
+                sanitized.scrub(
+                    attached_files=True,
+                    clean_pages=True,
+                    embedded_files=True,
+                    hidden_text=True,
+                    javascript=True,
+                    metadata=True,
+                    redactions=False,
+                    remove_links=True,
+                    reset_fields=True,
+                    reset_responses=True,
+                    thumbnails=True,
+                    xml_metadata=True,
+                )
+                flatten_meta = _save_flattened_pdf(sanitized, destination, progress)
         with pymupdf.open(destination) as check:
             if check.page_count < 1:
                 raise RedactionError("The redacted PDF is invalid")

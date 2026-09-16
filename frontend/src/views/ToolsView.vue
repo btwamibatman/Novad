@@ -24,11 +24,12 @@ type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se'
 type RedactionRect = RedactionFinding['rect']
 
 interface RedactionInteraction {
-  kind: 'draw' | 'resize'
+  kind: 'draw' | 'resize' | 'move'
   id?: string
   handle?: ResizeHandle
   start: { x: number; y: number }
   original?: RedactionRect
+  snapshot?: RedactionFinding[]
 }
 
 const { t } = useI18n()
@@ -46,8 +47,14 @@ const categories = ref<RedactionCategory[]>(['personal', 'financial', 'visual'])
 const redactionMode = ref<RedactionMode>('black')
 const redactionJobId = ref<number | null>(null)
 const selectedArtifactId = ref<number | null>(null)
-const selectedFindingIds = ref<string[]>([])
 const editableFindings = ref<RedactionFinding[]>([])
+const selectedFindingId = ref<string | null>(null)
+const editorMode = ref<'select' | 'draw'>('select')
+const undoStack = ref<RedactionFinding[][]>([])
+const historyScope = ref<'all' | 'document'>('all')
+const showHiddenHistory = ref(false)
+const historyLimit = ref(5)
+const updatingHistory = ref<number | null>(null)
 const previewElement = ref<HTMLElement | null>(null)
 const draftRect = ref<RedactionRect | null>(null)
 const currentPage = ref(1)
@@ -107,6 +114,20 @@ const pageCount = computed(() => Math.max(1, Number(redactionJob.value?.result_m
 const pageFindings = computed(() =>
   editableFindings.value.filter((finding) => finding.page === currentPage.value),
 )
+const affectedPages = computed(() => new Set(editableFindings.value.map((finding) => finding.page)).size)
+function isActiveJob(job: ToolJobRead): boolean {
+  return ['pending', 'running', 'review'].includes(job.status) ||
+    artifacts.value.some((artifact) => artifact.id === job.result_artifact_id && artifact.status === 'verifying')
+}
+const activeJobs = computed(() => jobs.value.filter(isActiveJob))
+const historyJobs = computed(() => jobs.value.filter((job) =>
+  !isActiveJob(job) &&
+  Boolean(job.hidden_from_history) === showHiddenHistory.value &&
+  (historyScope.value === 'all' || job.source_document_id === selectedDocumentId.value),
+))
+const visibleJobs = computed(() => [...activeJobs.value, ...historyJobs.value.slice(0, historyLimit.value)])
+
+watch([historyScope, showHiddenHistory, selectedDocumentId], () => { historyLimit.value = 5 })
 const hasRunningJobs = computed(() =>
   jobs.value.some((job) => ['pending', 'running'].includes(job.status)) ||
   artifacts.value.some((artifact) => artifact.status === 'verifying'),
@@ -131,7 +152,9 @@ watch(
         rect: { ...finding.rect },
         pdf_rect: [...finding.pdf_rect],
       }))
-      selectedFindingIds.value = editableFindings.value.map((finding) => finding.id)
+      selectedFindingId.value = null
+      undoStack.value = []
+      editorMode.value = 'select'
       currentPage.value = job.findings[0]?.page ?? 1
     } else if (status !== 'review' && hydratedReviewJobId === jobId) {
       hydratedReviewJobId = null
@@ -144,7 +167,12 @@ watch(activeTool, (tool) => {
     selectedDocumentId.value = redactionJob.value.source_document_id
   }
 })
-watch(currentPage, () => { previewFailed.value = false })
+watch(currentPage, () => {
+  cancelInteraction()
+  selectedFindingId.value = null
+  previewFailed.value = false
+})
+watch(activeTool, cancelInteraction)
 
 watch(requestedDocumentId, (id) => {
   if (!id || !pdfDocuments.value.some((document) => document.id === id)) return
@@ -285,7 +313,7 @@ async function previewRedaction(): Promise<void> {
 }
 
 async function applyRedaction(): Promise<void> {
-  if (!redactionJob.value || !selectedFindingIds.value.length) {
+  if (!redactionJob.value || !editableFindings.value.length) {
     show(t('tools.choose_finding'), 'error')
     return
   }
@@ -293,7 +321,6 @@ async function applyRedaction(): Promise<void> {
     toolsApi.applyRedaction(
       redactionJob.value!.id,
       editableFindings.value
-        .filter((finding) => selectedFindingIds.value.includes(finding.id))
         .map((finding) => ({ id: finding.id, page: finding.page, rect: finding.rect })),
       redactionMode.value,
     ),
@@ -312,7 +339,10 @@ function previewPoint(event: PointerEvent): { x: number; y: number } | null {
 }
 
 function startDrawing(event: PointerEvent): void {
+  if (event.button !== 0 || submitting.value) return
   if ((event.target as HTMLElement).closest('.finding-overlay')) return
+  previewElement.value?.focus()
+  selectedFindingId.value = null
   const point = previewPoint(event)
   if (!point) return
   event.preventDefault()
@@ -321,6 +351,7 @@ function startDrawing(event: PointerEvent): void {
 }
 
 function startResize(event: PointerEvent, finding: RedactionFinding, handle: ResizeHandle): void {
+  if (event.button !== 0 || submitting.value) return
   const point = previewPoint(event)
   if (!point) return
   event.preventDefault()
@@ -331,6 +362,22 @@ function startResize(event: PointerEvent, finding: RedactionFinding, handle: Res
     handle,
     start: point,
     original: { ...finding.rect },
+    snapshot: snapshotFindings(),
+  }
+}
+
+function startMove(event: PointerEvent, finding: RedactionFinding): void {
+  if (event.button !== 0 || submitting.value) return
+  if ((event.target as HTMLElement).closest('button')) return
+  const point = previewPoint(event)
+  if (!point) return
+  event.preventDefault()
+  previewElement.value?.focus()
+  selectedFindingId.value = finding.id
+  editorMode.value = 'select'
+  interaction = {
+    kind: 'move', id: finding.id, start: point,
+    original: { ...finding.rect }, snapshot: snapshotFindings(),
   }
 }
 
@@ -351,6 +398,14 @@ function pointerMove(event: PointerEvent): void {
   const finding = editableFindings.value.find((item) => item.id === interaction?.id)
   const original = interaction.original
   const handle = interaction.handle
+  if (finding && original && interaction.kind === 'move') {
+    finding.rect = {
+      ...original,
+      x: Math.max(0, Math.min(100 - original.width, original.x + point.x - interaction.start.x)),
+      y: Math.max(0, Math.min(100 - original.height, original.y + point.y - interaction.start.y)),
+    }
+    return
+  }
   if (!finding || !original || !handle) return
   const minSize = 0.5
   const right = original.x + original.width
@@ -373,6 +428,7 @@ function pointerUp(): void {
   if (interaction?.kind === 'draw' && draftRect.value) {
     const rect = draftRect.value
     if (rect.width >= 0.5 && rect.height >= 0.5) {
+      rememberEdit()
       const id = `manual-${Date.now()}-${manualFindingSequence++}`
       editableFindings.value.push({
         id,
@@ -384,7 +440,13 @@ function pointerUp(): void {
         pdf_rect: [],
         rect: { ...rect },
       })
-      selectedFindingIds.value.push(id)
+      selectedFindingId.value = id
+      editorMode.value = 'select'
+    }
+  } else if (interaction?.snapshot) {
+    const finding = editableFindings.value.find((item) => item.id === interaction?.id)
+    if (finding && JSON.stringify(finding.rect) !== JSON.stringify(interaction.original)) {
+      rememberEdit(interaction.snapshot)
     }
   }
   interaction = null
@@ -392,7 +454,7 @@ function pointerUp(): void {
 }
 
 function cancelInteraction(): void {
-  if (interaction?.kind === 'resize' && interaction.original) {
+  if (interaction?.original) {
     const finding = editableFindings.value.find((item) => item.id === interaction?.id)
     if (finding) finding.rect = interaction.original
   }
@@ -400,10 +462,66 @@ function cancelInteraction(): void {
   draftRect.value = null
 }
 
-function toggleFinding(id: string): void {
-  selectedFindingIds.value = selectedFindingIds.value.includes(id)
-    ? selectedFindingIds.value.filter((item) => item !== id)
-    : [...selectedFindingIds.value, id]
+function snapshotFindings(): RedactionFinding[] {
+  return editableFindings.value.map((finding) => ({ ...finding, rect: { ...finding.rect }, pdf_rect: [...finding.pdf_rect] }))
+}
+
+function rememberEdit(snapshot = snapshotFindings()): void {
+  undoStack.value = [...undoStack.value.slice(-29), snapshot]
+}
+
+function deleteFinding(id: string | null): void {
+  if (!id || submitting.value) return
+  cancelInteraction()
+  rememberEdit()
+  editableFindings.value = editableFindings.value.filter((finding) => finding.id !== id)
+  selectedFindingId.value = null
+}
+
+function undoEdit(): void {
+  if (submitting.value) return
+  cancelInteraction()
+  const previous = undoStack.value.pop()
+  if (!previous) return
+  const changed = previous.find((finding) => {
+    const current = editableFindings.value.find((item) => item.id === finding.id)
+    return !current || JSON.stringify(current.rect) !== JSON.stringify(finding.rect)
+  })
+  editableFindings.value = previous
+  if (changed) currentPage.value = changed.page
+  selectedFindingId.value = null
+}
+
+function editorKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    cancelInteraction()
+    editorMode.value = 'select'
+    selectedFindingId.value = null
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    undoEdit()
+  } else if (event.key === 'Delete' && selectedFindingId.value) {
+    event.preventDefault()
+    deleteFinding(selectedFindingId.value)
+  }
+}
+
+function setEditorMode(mode: 'select' | 'draw'): void {
+  cancelInteraction()
+  editorMode.value = mode
+  previewElement.value?.focus()
+}
+
+async function setHistoryHidden(job: ToolJobRead, hidden: boolean): Promise<void> {
+  updatingHistory.value = job.id
+  try {
+    const updated = await toolsApi.setJobHidden(job.id, hidden)
+    jobs.value = jobs.value.map((item) => item.id === updated.id ? updated : item)
+  } catch (error) {
+    handle(error)
+  } finally {
+    updatingHistory.value = null
+  }
 }
 
 function chooseFile(event: Event): void {
@@ -457,8 +575,10 @@ function addManualArea(): void {
 }
 
 function resizeWithKeyboard(event: KeyboardEvent, finding: RedactionFinding, corner: ResizeHandle): void {
+  if (submitting.value) return
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
   event.preventDefault()
+  rememberEdit()
   const step = event.shiftKey ? 5 : 1
   const rect = finding.rect
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -540,6 +660,7 @@ onMounted(async () => {
   window.addEventListener('pointermove', pointerMove)
   window.addEventListener('pointerup', pointerUp)
   window.addEventListener('pointercancel', cancelInteraction)
+  window.addEventListener('blur', cancelInteraction)
   if (!documentsStore.documents.length) {
     try { await documentsStore.load(false) } catch (error) { handle(error) }
   }
@@ -561,6 +682,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', pointerMove)
   window.removeEventListener('pointerup', pointerUp)
   window.removeEventListener('pointercancel', cancelInteraction)
+  window.removeEventListener('blur', cancelInteraction)
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
@@ -687,13 +809,12 @@ onBeforeUnmount(() => {
           <button class="button primary" type="button" :disabled="submitting || !selectedDocumentId || !categories.length" @click="previewRedaction">{{ t('tools.redaction.find') }}</button>
         </div>
 
-        <div v-else class="redaction-review">
+        <div v-else class="redaction-review" @keydown="editorKeydown">
           <p class="review-notice">{{ t('tools.refinement.review_notice') }}</p>
           <div class="review-toolbar">
             <div>
               <strong>{{ t('tools.redaction.found', { count: editableFindings.length }) }}</strong>
-              <span class="redaction-editor-help">{{ t('tools.redaction.editor_help') }}</span>
-              <span class="redaction-editor-help">{{ t('tools.refinement.keyboard_area_help') }}</span>
+              <span class="redaction-editor-help">{{ t('tools.editor.legend') }}</span>
             </div>
             <div class="page-switcher">
               <button class="icon-btn" type="button" :disabled="currentPage <= 1" :aria-label="t('tools.protected_ai.preview.previous_page')" @click="currentPage--">‹</button>
@@ -701,30 +822,37 @@ onBeforeUnmount(() => {
               <button class="icon-btn" type="button" :disabled="currentPage >= pageCount" :aria-label="t('tools.protected_ai.preview.next_page')" @click="currentPage++">›</button>
             </div>
           </div>
+          <div class="editor-toolbar" role="group" :aria-label="t('tools.editor.controls')">
+            <button class="button" type="button" :aria-pressed="editorMode === 'select'" @click="setEditorMode('select')">{{ t('tools.editor.select') }}</button>
+            <button class="button draw-area" type="button" :disabled="previewFailed || submitting" :aria-pressed="editorMode === 'draw'" @click="setEditorMode('draw')">{{ t('tools.editor.draw') }}</button>
+            <button class="button delete-area" type="button" :disabled="!selectedFindingId || submitting" @click="deleteFinding(selectedFindingId)">{{ t('tools.editor.delete') }}</button>
+            <button class="button undo-area" type="button" :disabled="!undoStack.length || submitting" @click="undoEdit">{{ t('tools.editor.undo') }}</button>
+          </div>
+          <p class="control-help" role="status">{{ t(editorMode === 'draw' ? 'tools.editor.draw_help' : 'tools.editor.select_help') }}</p>
           <div v-if="previewFailed" class="task-error" role="alert">{{ t('tools.refinement.preview_failed') }} <button class="button" type="button" @click="previewFailed = false">{{ t('tools.refinement.retry') }}</button></div>
-          <div v-else ref="previewElement" class="redaction-preview" @pointerdown="startDrawing">
+          <div v-else ref="previewElement" class="redaction-preview" :class="{ drawing: editorMode === 'draw' }" tabindex="0" :aria-label="t('tools.editor.canvas')" @pointerdown="startDrawing">
             <img :src="toolsApi.pagePreviewUrl(redactionJob.id, currentPage)" :alt="t('tools.redaction.page_preview', { page: currentPage })" @error="previewFailed = true" />
             <div
               v-for="finding in pageFindings"
               :key="finding.id"
               class="finding-overlay"
-              :class="{ excluded: !selectedFindingIds.includes(finding.id) }"
+              :class="{ selected: selectedFindingId === finding.id }"
               :style="{ left: `${finding.rect.x}%`, top: `${finding.rect.y}%`, width: `${finding.rect.width}%`, height: `${finding.rect.height}%` }"
               :title="`${finding.category}: ${finding.text || t(finding.category === 'MANUAL' ? 'tools.redaction.manual_item' : 'tools.redaction.visual_item')}`"
+              @pointerdown.stop="startMove($event, finding)"
             >
-              <button class="finding-toggle" type="button" :aria-label="t('tools.refinement.toggle_finding', { finding: finding.text || t('tools.redaction.manual_item') })" :aria-pressed="selectedFindingIds.includes(finding.id)" @click.stop="toggleFinding(finding.id)">
-                {{ selectedFindingIds.includes(finding.id) ? '✓' : '×' }}
-              </button>
-              <button
-                v-for="handle in (['nw', 'ne', 'sw', 'se'] as ResizeHandle[])"
-                :key="handle"
-                class="resize-handle"
-                :class="`resize-${handle}`"
-                type="button"
-                :aria-label="t('tools.redaction.resize_area')"
-                @pointerdown="startResize($event, finding, handle)"
-                @keydown="resizeWithKeyboard($event, finding, handle)"
-              ></button>
+              <template v-if="selectedFindingId === finding.id">
+                <button
+                  v-for="handle in (['nw', 'ne', 'sw', 'se'] as ResizeHandle[])"
+                  :key="handle"
+                  class="resize-handle"
+                  :class="`resize-${handle}`"
+                  type="button"
+                  :aria-label="t('tools.redaction.resize_area')"
+                  @pointerdown="startResize($event, finding, handle)"
+                  @keydown="resizeWithKeyboard($event, finding, handle)"
+                ></button>
+              </template>
             </div>
             <div
               v-if="draftRect"
@@ -732,18 +860,25 @@ onBeforeUnmount(() => {
               :style="{ left: `${draftRect.x}%`, top: `${draftRect.y}%`, width: `${draftRect.width}%`, height: `${draftRect.height}%` }"
             ></div>
           </div>
-          <button class="button add-area" type="button" :disabled="previewFailed" @click="addManualArea">{{ t('tools.refinement.add_area') }}</button>
+          <details class="keyboard-area-help">
+            <summary>{{ t('tools.editor.keyboard') }}</summary>
+            <p class="control-help">{{ t('tools.editor.keyboard_help') }}</p>
+            <button class="button add-area" type="button" :disabled="previewFailed || submitting" @click="addManualArea">{{ t('tools.editor.keyboard_add') }}</button>
+          </details>
           <p v-if="!editableFindings.length" class="control-help">{{ t('tools.refinement.no_findings') }}</p>
           <div class="finding-list">
-            <label v-for="finding in pageFindings" :key="finding.id">
-              <input v-model="selectedFindingIds" type="checkbox" :value="finding.id" />
-              <span>{{ finding.category }} · {{ finding.text || t(finding.category === 'MANUAL' ? 'tools.redaction.manual_item' : 'tools.redaction.visual_item') }}</span>
-            </label>
+            <div v-for="(finding, index) in pageFindings" :key="finding.id" class="finding-list-row">
+              <button class="finding-select" type="button" :aria-pressed="selectedFindingId === finding.id" @click="selectedFindingId = finding.id; setEditorMode('select')">
+                {{ index + 1 }}. {{ finding.category === 'MANUAL' ? t('tools.redaction.manual_item') : `${finding.category} · ${finding.text || t('tools.redaction.visual_item')}` }}
+              </button>
+              <button class="button small" type="button" :disabled="submitting" :aria-label="t('tools.editor.delete_named', { number: index + 1 })" @click="deleteFinding(finding.id)">{{ t('tools.editor.delete') }}</button>
+            </div>
           </div>
+          <p class="control-help" role="status">{{ t('tools.editor.apply_summary', { count: editableFindings.length, pages: affectedPages }) }}</p>
           <div class="apply-bar">
             <label><input v-model="redactionMode" type="radio" value="black" /> {{ t('tools.redaction.black') }}</label>
             <label><input v-model="redactionMode" type="radio" value="pseudonymize" /> {{ t('tools.redaction.pseudonymize') }}</label>
-            <button class="button primary" type="button" :disabled="submitting || !selectedFindingIds.length || previewFailed" @click="applyRedaction">{{ t('tools.redaction.apply', { count: selectedFindingIds.length }) }}</button>
+            <button class="button primary" type="button" :disabled="submitting || !editableFindings.length || previewFailed" @click="applyRedaction">{{ t('tools.redaction.apply', { count: editableFindings.length }) }}</button>
           </div>
         </div>
       </div>
@@ -760,12 +895,19 @@ onBeforeUnmount(() => {
 
     <section class="recent-tasks" aria-labelledby="recent-tasks-title" :aria-busy="loadingWorkspace">
       <h3 id="recent-tasks-title">{{ t('tools.refinement.recent_tasks') }}</h3>
+      <div class="history-controls">
+        <label>{{ t('tools.history.filter') }}
+          <select v-model="historyScope"><option value="all">{{ t('tools.history.all') }}</option><option value="document">{{ t('tools.history.document') }}</option></select>
+        </label>
+        <label><input v-model="showHiddenHistory" type="checkbox" /> {{ t('tools.history.hidden') }}</label>
+      </div>
+      <p class="control-help">{{ t('tools.history.help') }}</p>
       <p v-if="loadingWorkspace" role="status" class="control-help">{{ t('tools.refinement.loading_tasks') }}</p>
       <p v-else-if="workspaceLoadFailed" class="task-error" role="alert">{{ t('tools.refinement.load_failed') }} <button class="button" type="button" @click="loadWorkspace">{{ t('tools.refinement.retry') }}</button></p>
-      <p v-else-if="!jobs.length" class="control-help">{{ t('tools.refinement.no_tasks') }}</p>
-      <div v-if="jobs.length" class="task-list">
+      <p v-else-if="!visibleJobs.length" class="control-help">{{ t('tools.refinement.no_tasks') }}</p>
+      <div v-if="visibleJobs.length" class="task-list">
         <div class="task-column-headings" aria-hidden="true"><span>{{ t('tools.refinement.document') }}</span><span>{{ t('tools.refinement.operation') }}</span><span>{{ t('tools.refinement.status') }}</span><span>{{ t('tools.refinement.result') }}</span><span>{{ t('tools.refinement.action') }}</span></div>
-        <article v-for="job in jobs" :key="job.id" class="task-row" :aria-label="`${job.source_filename}: ${t(`tools.kind.${job.kind}`)}`">
+        <article v-for="job in visibleJobs" :key="job.id" class="task-row" :data-job-id="job.id" :aria-label="`${job.source_filename}: ${t(`tools.kind.${job.kind}`)}`">
           <strong class="task-filename">{{ job.source_filename }}</strong>
           <span class="task-operation">{{ t(`tools.kind.${job.kind}`) }}</span>
           <div class="task-status">
@@ -793,9 +935,11 @@ onBeforeUnmount(() => {
             <a v-if="job.status === 'completed' && job.result_filename" class="button" :href="toolsApi.downloadUrl(job.id)" :aria-label="t('tools.refinement.download_file', { filename: job.result_filename })">{{ t('tools.refinement.download') }}</a>
             <button v-else-if="job.status === 'review'" class="button" type="button" @click="openJob(job)">{{ t('tools.refinement.review') }}</button>
             <button v-else-if="job.status === 'failed'" class="button" type="button" @click="openJob(job)">{{ t('tools.refinement.open_tool') }}</button>
+            <button v-if="!isActiveJob(job)" class="button history-hide" type="button" :disabled="updatingHistory !== null" @click="setHistoryHidden(job, !job.hidden_from_history)">{{ t(job.hidden_from_history ? 'tools.history.restore' : 'tools.history.hide') }}</button>
           </div>
         </article>
       </div>
+      <button v-if="historyJobs.length > historyLimit" class="button history-more" type="button" @click="historyLimit += 5">{{ t('tools.history.more') }}</button>
     </section>
   </main>
 </template>
@@ -843,7 +987,17 @@ onBeforeUnmount(() => {
 .check-card small { font-size: 14px; }
 .review-notice, .completion-notice { color: var(--text); background: var(--surface-2); padding: 12px 16px; border-radius: 6px; line-height: 1.55; }
 .add-area { margin-top: 14px; }
-.finding-list label { font-size: 14px; padding: 6px 0; overflow-wrap: anywhere; }
+.editor-toolbar, .history-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0; }
+.editor-toolbar [aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
+.finding-list-row { display: flex; align-items: center; gap: 12px; }
+.finding-select { flex: 1; min-width: 0; padding: 8px; border: 1px solid transparent; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.finding-select[aria-pressed="true"] { border-color: #2563eb; border-radius: 4px; }
+.finding-list-row > .button { flex-shrink: 0; width: auto; max-width: 50%; }
+.keyboard-area-help { margin-top: 16px; color: var(--text-soft); }
+.keyboard-area-help summary { cursor: pointer; }
+.history-controls label { display: flex; align-items: center; gap: 8px; }
+.history-controls select { width: auto; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+.history-more { margin-top: 16px; }
 .review-toolbar { gap: 18px; }
 .review-toolbar > div:first-child { min-width: 0; }
 .page-switcher { white-space: nowrap; }
@@ -860,7 +1014,7 @@ onBeforeUnmount(() => {
 .task-badge.completed { color: var(--success); background: var(--success-soft); }
 .task-badge.failed { color: var(--danger); background: var(--danger-soft); }
 .task-badge.review { color: var(--warning); background: var(--warning-soft); }
-.task-action { justify-self: end; }
+.task-action { justify-self: end; display: grid; gap: 8px; }
 .task-action .button { font-size: 14px; }
 .task-error { margin: 0; color: var(--danger); line-height: 1.55; overflow-wrap: anywhere; }
 .task-error > .button { margin-left: 8px; }

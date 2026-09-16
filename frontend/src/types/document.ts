@@ -132,6 +132,7 @@ export interface ToolJobRead {
   status: ToolJobStatus
   stage: string
   progress: number
+  hidden_from_history?: boolean
   source_filename: string
   source_content_type: string
   options: Record<string, unknown>

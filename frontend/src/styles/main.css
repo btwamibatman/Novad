@@ -991,8 +991,7 @@ tbody tr[data-document-id]:hover {
   margin: 0 auto;
   border: 1px solid var(--border);
   background: #fff;
-  cursor: crosshair;
-  touch-action: none;
+  cursor: default;
   user-select: none;
 }
 
@@ -1003,50 +1002,36 @@ tbody tr[data-document-id]:hover {
   pointer-events: none;
 }
 
+.redaction-preview.drawing { cursor: crosshair; touch-action: none; }
+
 .finding-overlay {
   position: absolute;
-  min-width: 18px;
-  min-height: 18px;
   border: 2px solid var(--danger);
-  background: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: #fff;
   padding: 0;
-  cursor: default;
+  cursor: move;
+  touch-action: none;
+  box-sizing: border-box;
 }
 
 .finding-overlay.draft {
   pointer-events: none;
 }
 
-.finding-overlay.excluded {
-  border-color: var(--muted);
-  background: color-mix(in srgb, var(--muted) 20%, transparent);
-}
-
-.finding-toggle {
-  position: absolute;
-  top: -11px;
-  right: -9px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--danger);
-  border: 0;
-  color: #fff;
-  cursor: pointer;
-  padding: 0;
-  font-size: 11px;
+.finding-overlay.selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  z-index: 2;
 }
 
 .resize-handle {
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   border: 1px solid #fff;
   border-radius: 2px;
-  background: var(--danger);
+  background: #2563eb;
   padding: 0;
 }
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_document_or_404
@@ -17,6 +17,7 @@ from app.schemas.tools import (
     PdfToWordRequest,
     RedactionApplyRequest,
     RedactionPreviewRequest,
+    ToolJobHistoryUpdate,
     ToolJobRead,
 )
 from app.services.documents import artifacts as document_artifacts
@@ -38,12 +39,26 @@ def list_jobs(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> list[ToolJob]:
+    recent_ids = (
+        select(ToolJob.id)
+        .where(ToolJob.user_id == current_session.user_id)
+        .order_by(ToolJob.created_at.desc(), ToolJob.id.desc())
+        .limit(50)
+    )
     return list(
         db.scalars(
             select(ToolJob)
             .where(ToolJob.user_id == current_session.user_id)
+            .where(
+                or_(
+                    ToolJob.id.in_(recent_ids),
+                    ToolJob.status.in_(["pending", "running", "review"]),
+                    ToolJob.result_artifact_id.in_(
+                        select(DocumentArtifact.id).where(DocumentArtifact.status == "verifying")
+                    ),
+                )
+            )
             .order_by(ToolJob.created_at.desc(), ToolJob.id.desc())
-            .limit(50)
         )
     )
 
@@ -57,17 +72,42 @@ def read_job(
     return _owned_job(db, job_id, current_session.user_id)
 
 
+@router.patch("/jobs/{job_id}/history", response_model=ToolJobRead)
+def update_job_history(
+    job_id: int,
+    payload: ToolJobHistoryUpdate,
+    db: Session = Depends(get_db),
+    current_session: UserSession = Depends(get_current_session),
+) -> ToolJob:
+    job = _owned_job(db, job_id, current_session.user_id)
+    if job.status not in {"completed", "failed"}:
+        raise HTTPException(status_code=409, detail="Only finished tasks can be hidden")
+    artifact = db.get(DocumentArtifact, job.result_artifact_id) if job.result_artifact_id else None
+    if artifact is not None and artifact.status == "verifying":
+        raise HTTPException(status_code=409, detail="Wait until the protected copy is verified")
+    job.hidden_from_history = payload.hidden
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 @router.get("/artifacts", response_model=list[DocumentArtifactRead])
 def list_artifacts(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> list[DocumentArtifact]:
+    recent_ids = (
+        select(DocumentArtifact.id)
+        .where(DocumentArtifact.user_id == current_session.user_id)
+        .order_by(DocumentArtifact.created_at.desc(), DocumentArtifact.id.desc())
+        .limit(50)
+    )
     return list(
         db.scalars(
             select(DocumentArtifact)
             .where(DocumentArtifact.user_id == current_session.user_id)
+            .where(or_(DocumentArtifact.id.in_(recent_ids), DocumentArtifact.status == "verifying"))
             .order_by(DocumentArtifact.created_at.desc(), DocumentArtifact.id.desc())
-            .limit(50)
         )
     )
 

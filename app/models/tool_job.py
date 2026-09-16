@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -25,6 +25,9 @@ class ToolJob(Base):
     )
     stage: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    hidden_from_history: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     source_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     source_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     source_path: Mapped[str] = mapped_column(String(500), nullable=False)

@@ -47,6 +47,10 @@ class RedactionApplyRequest(BaseModel):
     mode: RedactionMode = "black"
 
 
+class ToolJobHistoryUpdate(BaseModel):
+    hidden: bool
+
+
 class ToolJobRead(BaseModel):
     id: int
     source_document_id: int | None
@@ -54,6 +58,7 @@ class ToolJobRead(BaseModel):
     status: ToolJobStatus
     stage: str
     progress: int
+    hidden_from_history: bool = False
     source_filename: str
     source_content_type: str
     options: dict = Field(default_factory=dict)

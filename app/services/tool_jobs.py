@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from pathlib import Path
 import re
 
@@ -16,6 +17,7 @@ from app.services.documents import redaction as document_redaction
 from app.services.documents import tools as document_tools
 
 SessionFactory = Callable[[], Session]
+logger = logging.getLogger(__name__)
 
 
 def claim_next_job(db: Session) -> ToolJob | None:
@@ -96,6 +98,7 @@ def process_tool_job(
                 raise document_tools.DocumentToolError("Unknown tool job")
             db.commit()
         except Exception as error:
+            logger.exception("Tool job failed: job_id=%s kind=%s stage=%s", job_id, job.kind, job.stage)
             job.status = "failed"
             job.stage = "failed"
             job.error_message = str(error)

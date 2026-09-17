@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import { toolsApi } from '@/api/tools'
+import DocumentUpload from '@/components/documents/DocumentUpload.vue'
 import ProtectedArtifactAI from '@/components/tools/ProtectedArtifactAI.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
@@ -62,6 +63,7 @@ const submitting = ref(false)
 const loadingWorkspace = ref(true)
 const workspaceLoadFailed = ref(false)
 const documentPickerOpen = ref(false)
+const uploadOpen = ref(false)
 const sourceSelect = ref<HTMLSelectElement | null>(null)
 const wordInput = ref<HTMLInputElement | null>(null)
 const previewFailed = ref(false)
@@ -548,6 +550,12 @@ function sourceDocumentChanged(): void {
   hydratedReviewJobId = null
 }
 
+function documentUploaded(documentId: number): void {
+  selectedDocumentId.value = documentId
+  sourceDocumentChanged()
+  uploadOpen.value = false
+}
+
 async function changeDocument(): Promise<void> {
   documentPickerOpen.value = !documentPickerOpen.value
   if (documentPickerOpen.value) {
@@ -722,9 +730,17 @@ onBeforeUnmount(() => {
           <strong class="source-filename">{{ selectedDocument?.filename ?? t('tools.choose_pdf') }}</strong>
           <span v-if="selectedDocument">{{ formatBytes(selectedDocument.size_bytes) }}</span>
         </div>
-        <button class="button" type="button" :disabled="sourceLocked || !pdfDocuments.length" :aria-expanded="documentPickerOpen" aria-controls="tool-document-picker" @click="changeDocument">
-          {{ t('tools.refinement.change_document') }}
-        </button>
+        <div class="source-actions">
+          <button class="button" type="button" :disabled="sourceLocked || submitting || documentsStore.busy" :aria-expanded="uploadOpen" aria-controls="tool-document-upload" @click="uploadOpen = !uploadOpen">
+            {{ t('upload.add_document') }}
+          </button>
+          <button class="button" type="button" :disabled="sourceLocked || !pdfDocuments.length || documentsStore.busy" :aria-expanded="documentPickerOpen" aria-controls="tool-document-picker" @click="changeDocument">
+            {{ t('tools.refinement.change_document') }}
+          </button>
+        </div>
+      </div>
+      <div v-if="uploadOpen && !sourceLocked" id="tool-document-upload">
+        <DocumentUpload @uploaded="documentUploaded" @close="uploadOpen = false" />
       </div>
       <label v-show="documentPickerOpen" id="tool-document-picker" class="document-picker">
         <span>{{ t('tools.choose_pdf') }}</span>
@@ -734,7 +750,7 @@ onBeforeUnmount(() => {
         </select>
       </label>
       <p v-if="sourceLocked" class="control-help">{{ t('tools.redaction.source_locked') }}</p>
-      <p v-else-if="!pdfDocuments.length" class="control-help">{{ t('tools.refinement.no_pdf') }} <RouterLink to="/documents">{{ t('nav.documents') }}</RouterLink></p>
+      <p v-else-if="!pdfDocuments.length" class="control-help">{{ t('tools.refinement.no_pdf') }}</p>
       <p v-if="activeTool === 'conversion'" class="control-help">{{ t('tools.refinement.conversion_source_help') }}</p>
     </section>
 
@@ -953,6 +969,7 @@ onBeforeUnmount(() => {
 .tool-tab.active { border-bottom-color: var(--accent); color: var(--accent); }
 .tool-source { display: grid; gap: 12px; }
 .source-summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.source-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-label { display: grid; gap: 5px; min-width: 0; }
 .source-label > span { color: var(--text-soft); font-size: 14px; }
 .source-summary > .button { flex-shrink: 0; }

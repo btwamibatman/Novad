@@ -7,7 +7,7 @@ import { useToasts } from '@/composables/useToasts'
 import { useDocumentsStore } from '@/stores/documents'
 
 const { t } = useI18n()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; uploaded: [documentId: number] }>()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
@@ -34,12 +34,13 @@ async function upload(file: File | null): Promise<void> {
     return
   }
   try {
-    await documentsStore.upload(file)
+    const document = await documentsStore.upload(file)
     selectedFile.value = null
     if (fileInput.value) {
       fileInput.value.value = ''
     }
     show(t('upload.completed'), 'success')
+    emit('uploaded', document.id)
     emit('close')
   } catch (error) {
     handle(error)

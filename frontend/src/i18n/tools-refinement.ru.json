@@ -22,7 +22,7 @@
   "tools.history.more": "Показать ещё",
   "tools.history.help": "Активные задачи всегда сверху. Ниже — последние завершённые операции (до 50 последних задач). Убирая запись из истории, вы сохраняете файл; запись можно вернуть из скрытых.",
   "tools.refinement.change_document": "Сменить документ",
-  "tools.refinement.no_pdf": "Загрузите PDF на странице «Документы», чтобы защитить, сжать или преобразовать его в Word.",
+  "tools.refinement.no_pdf": "Добавьте PDF здесь, чтобы защитить, сжать или преобразовать его в Word. Файл также появится на странице «Документы».",
   "tools.refinement.conversion_source_help": "PDF → Word использует выбранный документ. Для Word → PDF выберите файл ниже.",
   "tools.refinement.choose_word_file": "Выбрать файл Word",
   "tools.refinement.change_file": "Сменить файл",

@@ -52,6 +52,7 @@ const panelGlobal = {
 }
 
 describe('protected AI entry points and disclosure', () => {
+  afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
     vi.clearAllMocks()
     i18n.global.locale.value = 'en'
@@ -106,6 +107,37 @@ describe('protected AI entry points and disclosure', () => {
     await wrapper.get('button').trigger('click')
     await flushPromises()
     expect(mocks.store.analyze).toHaveBeenCalledWith(33)
+    wrapper.unmount()
+  })
+
+  it.each([
+    [SummaryPanel, 'summarize'],
+    [ContentReviewPanel, 'reviewContent'],
+  ] as const)('requires consent for external text actions', async (component, action) => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = shallowMount(component, { global: panelGlobal })
+    expect(mocks.store[action]).not.toHaveBeenCalled()
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalled()
+    expect(mocks.store[action]).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.store[action]).toHaveBeenCalledWith(...(
+      action === 'summarize' ? [33, true] : [33, 'quick', true]
+    ))
+    wrapper.unmount()
+  })
+
+  it('runs local text actions without external consent', async () => {
+    mocks.getProviderInfo.mockResolvedValue({ provider: 'ollama' })
+    const confirm = vi.spyOn(window, 'confirm')
+    const wrapper = shallowMount(SummaryPanel, { global: panelGlobal })
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(mocks.store.summarize).toHaveBeenCalledWith(33, false)
     wrapper.unmount()
   })
 

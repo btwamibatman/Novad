@@ -232,7 +232,9 @@ python -m app.analysis_worker
 Successful PDF uploads automatically queue text extraction, OCR when needed, and
 document metrics. Keep the worker running; otherwise documents stay queued. Failed
 processing keeps the uploaded file, and **Retry** queues the same document again.
-AI summaries and reviews remain separate actions.
+AI summaries and reviews remain separate actions. External text processing requires
+explicit consent (`consent_to_external_processing: true` for the summary and content
+review endpoints); local processing does not require this flag.
 
 
 For frontend development:

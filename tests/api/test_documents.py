@@ -15,6 +15,7 @@ from tests.conftest import TestingSessionLocal
 from app.services import text_analysis
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import layout_review as ai_layout_review
+from app.services.ai import summary as ai_summary
 from app.services.file_storage import resolve_stored_path
 from tests.helpers.pdf import (
     make_pdf_with_text,
@@ -74,6 +75,38 @@ def test_upload_rolls_back_when_enqueue_fails(client, monkeypatch):
         assert db.scalar(select(Document)) is None
         assert db.scalar(select(AnalysisJob)) is None
     assert not list(Path(settings.storage_dir).glob("*"))
+
+
+@pytest.mark.parametrize("action", ["summarize", "content-review"])
+def test_external_text_processing_requires_consent(
+    client, pdf_document_id, analysis_runner, monkeypatch, action
+):
+    analysis_runner()
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    calls = []
+
+    def fake_summary(*args, **kwargs):
+        calls.append("summary")
+        return "Summary", "test-provider"
+
+    def fake_review(*args, **kwargs):
+        calls.append("review")
+        return ai_content_review.ContentReviewResult(
+            text="Review", model="test-provider", mode="quick",
+            total_chars=100, reviewed_chars=100, batch_count=1, complete=True,
+        )
+
+    monkeypatch.setattr(ai_summary, "summarize_chunks", fake_summary)
+    monkeypatch.setattr(ai_content_review, "review_document_content", fake_review)
+    url = f"/api/documents/{pdf_document_id}/{action}"
+    for payload in ({}, {"consent_to_external_processing": False}):
+        blocked = client.post(url, json=payload)
+        assert blocked.status_code == 400
+        assert "consent" in blocked.json()["detail"]
+    assert calls == []
+    approved = client.post(url, json={"consent_to_external_processing": True})
+    assert approved.status_code == 200
+    assert len(calls) == 1
 
 
 def test_reject_empty_upload(client):

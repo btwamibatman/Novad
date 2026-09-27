@@ -6,11 +6,13 @@ import { RouterLink } from 'vue-router'
 import { useDocumentsStore } from '@/stores/documents'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
+import { useExternalTextConsent } from '@/composables/useExternalTextConsent'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
+const requestConsent = useExternalTextConsent()
 const document = computed(() => documentsStore.selectedDocument)
 const state = computed(() => {
   if (!document.value) return t('common.no_document_selected')
@@ -45,7 +47,10 @@ const protectedRoute = computed(() => ({
 async function summarize(): Promise<void> {
   if (!document.value) return
   try {
-    await documentsStore.summarize(document.value.id)
+    const documentId = document.value.id
+    const consent = await requestConsent()
+    if (consent === null) return
+    await documentsStore.summarize(documentId, consent)
     show(t('summary.generated'), 'success')
   } catch (error) {
     handle(error)

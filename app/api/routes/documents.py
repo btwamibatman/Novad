@@ -15,6 +15,7 @@ from app.schemas.document import (
     DocumentLayoutReviewRequest,
     DocumentRead,
     DocumentReviewRequest,
+    DocumentSummaryRequest,
 )
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import summary as ai_summary
@@ -34,6 +35,14 @@ from app.services.documents.chunks import (
 )
 
 router = APIRouter()
+
+
+def require_external_text_consent(consent: bool) -> None:
+    if settings.ai_provider.strip().lower() != "ollama" and not consent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Explicit consent to external text processing is required",
+        )
 
 
 @router.post("/upload", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
@@ -108,6 +117,7 @@ def analyze_document(
 @router.post("/{document_id}/summarize", response_model=DocumentRead)
 async def summarize_document(
     document_id: int,
+    payload: DocumentSummaryRequest | None = None,
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
@@ -119,6 +129,7 @@ async def summarize_document(
             detail="Document must be analyzed first",
         )
 
+    require_external_text_consent(payload is not None and payload.consent_to_external_processing)
     chunks = document_crud.get_document_chunks(db, db_document.id)
     chunk_texts = (
         [format_chunks_for_context([chunk]) for chunk in chunks]
@@ -238,6 +249,7 @@ async def review_document_content(
             detail="Document must be analyzed first",
         )
 
+    require_external_text_consent(payload.consent_to_external_processing)
     chunks = document_crud.get_document_chunks(db, db_document.id)
     review_chunks = chunks or [
         ai_content_review.ReviewChunkData(

@@ -6,6 +6,7 @@ import { RouterLink } from 'vue-router'
 import MarkdownContent from '@/components/common/MarkdownContent.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
+import { useExternalTextConsent } from '@/composables/useExternalTextConsent'
 import { useDocumentsStore } from '@/stores/documents'
 import type { ContentReviewMode } from '@/types/document'
 
@@ -13,6 +14,7 @@ const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
+const requestConsent = useExternalTextConsent()
 const mode = ref<ContentReviewMode>('quick')
 const document = computed(() => documentsStore.selectedDocument)
 const pending = computed(
@@ -59,7 +61,11 @@ const content = computed(() => {
 async function review(): Promise<void> {
   if (!document.value) return
   try {
-    await documentsStore.reviewContent(document.value.id, mode.value)
+    const documentId = document.value.id
+    const reviewMode = mode.value
+    const consent = await requestConsent()
+    if (consent === null) return
+    await documentsStore.reviewContent(documentId, reviewMode, consent)
     show(t('content_review.completed'), 'success')
   } catch (error) {
     const handled = handle(error)

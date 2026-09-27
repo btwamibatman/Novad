@@ -229,6 +229,11 @@ Run the analysis worker in a second terminal:
 .\.venv\Scripts\Activate.ps1
 python -m app.analysis_worker
 
+Successful PDF uploads automatically queue text extraction, OCR when needed, and
+document metrics. Keep the worker running; otherwise documents stay queued. Failed
+processing keeps the uploaded file, and **Retry** queues the same document again.
+AI summaries and reviews remain separate actions.
+
 
 For frontend development:
 

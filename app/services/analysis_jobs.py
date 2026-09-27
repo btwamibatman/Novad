@@ -122,6 +122,12 @@ def process_analysis_job(
             db.commit()
 
         try:
+            document.analysis_progress = {
+                "stage": "extracting",
+                "completed_pages": 0,
+                "total_pages": None,
+            }
+            db.commit()
             extracted_pages = extract_text_pages(
                 document,
                 progress_callback=update_progress,

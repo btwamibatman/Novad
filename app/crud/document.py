@@ -96,8 +96,7 @@ def create_document(
         status="uploaded",
     )
     db.add(db_document)
-    db.commit()
-    db.refresh(db_document)
+    db.flush()
     return db_document
 
 

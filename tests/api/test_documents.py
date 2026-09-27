@@ -4,9 +4,14 @@ import sys
 from types import SimpleNamespace
 
 from pypdf import PdfReader
+import pytest
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.schemas.ai_chat import AIChatResponse
+from app.models.analysis_job import AnalysisJob
+from app.models.document import Document
+from tests.conftest import TestingSessionLocal
 from app.services import text_analysis
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import layout_review as ai_layout_review
@@ -31,7 +36,12 @@ def upload_pdf(client, filename: str = "sample.pdf", text: str | None = None):
     )
 
 
-def test_upload_pdf_document(client):
+def test_upload_pdf_document(client, analysis_runner, monkeypatch):
+    def unexpected_ai(*args, **kwargs):
+        pytest.fail("Upload and text extraction must not start AI generation")
+
+    monkeypatch.setattr("app.services.ollama_provider.OllamaProvider.generate_structured", unexpected_ai)
+    monkeypatch.setattr("app.services.gemini_provider.GeminiProvider", unexpected_ai)
     response = upload_pdf(client)
 
     assert response.status_code == 201
@@ -39,7 +49,31 @@ def test_upload_pdf_document(client):
     assert data["id"] == 1
     assert data["filename"] == "sample.pdf"
     assert data["content_type"] == "application/pdf"
-    assert data["status"] == "uploaded"
+    assert data["status"] == "analyzing"
+    assert data["analysis_progress"]["stage"] == "queued"
+    with TestingSessionLocal() as db:
+        jobs = list(db.scalars(select(AnalysisJob)))
+        assert len(jobs) == 1
+        assert jobs[0].status == "pending"
+    analysis_runner()
+    result = client.get(f"/api/documents/{data['id']}").json()
+    assert result["status"] == "processed"
+    assert result["word_count"] > 0
+    assert result["extracted_text"]
+    assert result["ai_summary"] == result["content_review"] == result["layout_review"] == ""
+
+
+def test_upload_rolls_back_when_enqueue_fails(client, monkeypatch):
+    def fail_enqueue(db, document):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr("app.api.routes.documents.enqueue_analysis", fail_enqueue)
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        upload_pdf(client)
+    with TestingSessionLocal() as db:
+        assert db.scalar(select(Document)) is None
+        assert db.scalar(select(AnalysisJob)) is None
+    assert not list(Path(settings.storage_dir).glob("*"))
 
 
 def test_reject_empty_upload(client):
@@ -283,9 +317,11 @@ def test_failed_analysis_job_can_be_retried(
         fake_extract,
     )
 
-    client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
-    assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "failed"
+    failed = client.get(f"/api/documents/{pdf_document_id}").json()
+    assert failed["status"] == "failed"
+    assert failed["error_message"] == "temporary OCR failure"
+    assert client.get(f"/api/documents/{pdf_document_id}/download").status_code == 200
 
     retry = client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
@@ -647,7 +683,7 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "uploaded"
+    assert data["status"] == "analyzing"
     assert data["layout_review"] == "The visual layout is generally consistent."
     assert data["layout_review_model"] == "test-vision-model"
     assert data["layout_review_meta"]["reviewed_pages"] == [1, 4, 6]

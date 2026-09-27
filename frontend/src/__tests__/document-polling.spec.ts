@@ -35,12 +35,12 @@ describe('document polling', () => {
 
     try {
       polling.schedule()
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(3000)
 
       expect(load).toHaveBeenCalledTimes(1)
       expect(onError).toHaveBeenCalledWith(transientError)
 
-      await vi.advanceTimersByTimeAsync(1500)
+      await vi.advanceTimersByTimeAsync(3000)
 
       expect(load).toHaveBeenCalledTimes(2)
     } finally {
@@ -67,7 +67,7 @@ describe('document polling', () => {
     }
 
     polling.schedule()
-    vi.advanceTimersByTime(1500)
+    vi.advanceTimersByTime(3000)
     expect(load).toHaveBeenCalledTimes(1)
 
     scope.stop()
@@ -76,7 +76,7 @@ describe('document polling', () => {
     await Promise.resolve()
 
     expect(vi.getTimerCount()).toBe(0)
-    await vi.advanceTimersByTimeAsync(1500)
+    await vi.advanceTimersByTimeAsync(3000)
     expect(load).toHaveBeenCalledTimes(1)
   })
 })

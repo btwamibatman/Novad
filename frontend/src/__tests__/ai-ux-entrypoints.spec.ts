@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import ContentReviewPanel from '@/components/analysis/ContentReviewPanel.vue'
 import LayoutReviewPanel from '@/components/analysis/LayoutReviewPanel.vue'
 import SummaryPanel from '@/components/analysis/SummaryPanel.vue'
+import AnalysisPanel from '@/components/analysis/AnalysisPanel.vue'
 import AIChatWindow from '@/components/chat/AIChatWindow.vue'
 import { i18n } from '@/i18n'
 import { makeDocument } from '@/__tests__/fixtures'
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     reviewContent: vi.fn(),
     reviewLayout: vi.fn(),
     load: vi.fn(),
+    analyze: vi.fn(),
   },
   getProviderInfo: vi.fn(),
   useDocumentChat: vi.fn(),
@@ -74,6 +76,36 @@ describe('protected AI entry points and disclosure', () => {
       query: { task: 'summary', document_id: '33' },
     })
     expect(wrapper.text()).toContain('Quick text summary')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['queued', 'В очереди'],
+    ['extracting', 'Извлекаем текст'],
+    ['ocr', 'Распознаём страницы'],
+    ['quality', 'Вычисляем метрики'],
+  ])('shows automatic processing stage %s without a manual start prompt', (stage, label) => {
+    i18n.global.locale.value = 'ru'
+    mocks.store.selectedDocument = makeDocument({
+      status: 'analyzing', extracted_text: '',
+      analysis_progress: { stage, completed_pages: 1, total_pages: 3 },
+    })
+    const wrapper = shallowMount(AnalysisPanel, { global: panelGlobal })
+    expect(wrapper.get('[role="status"]').text()).toContain(label)
+    expect(wrapper.text()).not.toContain('Запустите анализ')
+    expect(wrapper.text()).toContain('1 из 3')
+    expect(mocks.store.analyze).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows a saved-file error and retries the same document', async () => {
+    mocks.store.selectedDocument = makeDocument({ id: 33, status: 'failed', error_message: 'OCR failed' })
+    const wrapper = shallowMount(AnalysisPanel, { global: panelGlobal })
+    expect(wrapper.get('[role="alert"]').text()).toContain('OCR failed')
+    expect(wrapper.text()).toContain('Your uploaded file is saved')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.store.analyze).toHaveBeenCalledWith(33)
     wrapper.unmount()
   })
 

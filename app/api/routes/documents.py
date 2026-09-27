@@ -57,7 +57,7 @@ async def upload_document(
             },
         )
     try:
-        return document_crud.create_document(
+        document = document_crud.create_document(
             db,
             user_id=current_session.user_id,
             session_id=current_session.id,
@@ -67,7 +67,9 @@ async def upload_document(
             content_type=content_type,
             size_bytes=size_bytes,
         )
+        return enqueue_analysis(db, document)
     except Exception:
+        db.rollback()
         remove_stored_file(stored_path)
         raise
 

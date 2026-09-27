@@ -4,9 +4,10 @@ import { expect, test, type Page } from '@playwright/test'
 import { makeDocument } from '../src/__tests__/fixtures'
 import type { DocumentRead, ToolJobRead } from '../src/types/document'
 import en from '../src/i18n/en.json' with { type: 'json' }
+import toolsEn from '../src/i18n/tools-refinement.en.json' with { type: 'json' }
 
 const reviewDirectory = resolve(import.meta.dirname, '../../artifacts/ui-review')
-const longFilename = 'Отчёт_по_производственной_практике_и_индивидуальным_заданиям_Абдигалым_Хамза_2026_окончательная_версия.pdf'
+const longFilename = 'Отчёт_по_производственной_практике_и_индивидуальным_заданиям_Тестовый_Пользователь_2026_окончательная_версия.pdf'
 const session = {
   session_id: 'ui-review-session', expires_at: '2099-01-01T00:00:00Z',
   user: { id: 1, username: 'hamza' },
@@ -154,7 +155,7 @@ test('keyboard upload restores focus, preserves errors and updates the table aft
   await upload.focus()
   await page.keyboard.press('Enter')
   await expect(upload).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByRole('button', { name: /Choose (a )?file/ })).toBeFocused()
+  await expect(page.getByRole('button', { name: en['upload.choose_file'], exact: true })).toBeFocused()
   expect(await page.locator(':focus').evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe('none')
   await page.keyboard.press('Escape')
   await expect(upload).toBeFocused()
@@ -215,7 +216,7 @@ test('redaction separates detected findings from applied protection and preserve
   expect(state.calls.find((call) => call.path.endsWith('/preview'))?.body).toEqual({ document_id: 1, categories: ['personal', 'financial', 'visual'] })
   await screenshot(page, 'tools-review-desktop')
   await page.getByRole('button', { name: 'Apply to 1 areas' }).click()
-  await expect(page.getByText(en['tools.refinement.redaction_failed']).first()).toBeVisible()
+  await expect(page.getByText(toolsEn['tools.refinement.redaction_failed']).first()).toBeVisible()
   await expect(page.getByRole('link', { name: 'Download protected PDF', exact: true })).toHaveCount(0)
   await page.locator('.task-row details summary').click()
   await expect(page.getByText('Unable to apply redactions safely', { exact: true })).toBeVisible()

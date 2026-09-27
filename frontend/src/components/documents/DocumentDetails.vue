@@ -4,10 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
 import { useDocumentsStore } from '@/stores/documents'
-import { aiState, documentLanguage } from '@/utils/documents'
+import { aiState, analysisStage, documentLanguage } from '@/utils/documents'
 import { formatBytes, languageName } from '@/utils/format'
 
-const { t, te, locale } = useI18n()
+const { t, locale } = useI18n()
 const documentsStore = useDocumentsStore()
 const document = computed(() => documentsStore.selectedDocument)
 const state = computed(() => (document.value ? aiState(document.value) : 'none'))
@@ -21,7 +21,7 @@ const progress = computed(() => {
   return t('analysis.progress', {
     completed: value.completed_pages ?? 0,
     total: value.total_pages ?? '?',
-    stage: te(`tools.stage.${value.stage}`) ? t(`tools.stage.${value.stage}`) : t('status.analyzing'),
+    stage: t(`analysis.stage.${analysisStage(document.value)}`),
   })
 })
 </script>

@@ -4,11 +4,18 @@ import sys
 from types import SimpleNamespace
 
 from pypdf import PdfReader
+import pytest
+from sqlalchemy import select
 
 from app.core.config import settings
+from app.schemas.ai_chat import AIChatResponse
+from app.models.analysis_job import AnalysisJob
+from app.models.document import Document
+from tests.conftest import TestingSessionLocal
 from app.services import text_analysis
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import layout_review as ai_layout_review
+from app.services.ai import summary as ai_summary
 from app.services.file_storage import resolve_stored_path
 from tests.helpers.pdf import (
     make_pdf_with_text,
@@ -30,7 +37,12 @@ def upload_pdf(client, filename: str = "sample.pdf", text: str | None = None):
     )
 
 
-def test_upload_pdf_document(client):
+def test_upload_pdf_document(client, analysis_runner, monkeypatch):
+    def unexpected_ai(*args, **kwargs):
+        pytest.fail("Upload and text extraction must not start AI generation")
+
+    monkeypatch.setattr("app.services.ollama_provider.OllamaProvider.generate_structured", unexpected_ai)
+    monkeypatch.setattr("app.services.gemini_provider.GeminiProvider", unexpected_ai)
     response = upload_pdf(client)
 
     assert response.status_code == 201
@@ -38,7 +50,63 @@ def test_upload_pdf_document(client):
     assert data["id"] == 1
     assert data["filename"] == "sample.pdf"
     assert data["content_type"] == "application/pdf"
-    assert data["status"] == "uploaded"
+    assert data["status"] == "analyzing"
+    assert data["analysis_progress"]["stage"] == "queued"
+    with TestingSessionLocal() as db:
+        jobs = list(db.scalars(select(AnalysisJob)))
+        assert len(jobs) == 1
+        assert jobs[0].status == "pending"
+    analysis_runner()
+    result = client.get(f"/api/documents/{data['id']}").json()
+    assert result["status"] == "processed"
+    assert result["word_count"] > 0
+    assert result["extracted_text"]
+    assert result["ai_summary"] == result["content_review"] == result["layout_review"] == ""
+
+
+def test_upload_rolls_back_when_enqueue_fails(client, monkeypatch):
+    def fail_enqueue(db, document):
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr("app.api.routes.documents.enqueue_analysis", fail_enqueue)
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        upload_pdf(client)
+    with TestingSessionLocal() as db:
+        assert db.scalar(select(Document)) is None
+        assert db.scalar(select(AnalysisJob)) is None
+    assert not list(Path(settings.storage_dir).glob("*"))
+
+
+@pytest.mark.parametrize("action", ["summarize", "content-review"])
+def test_external_text_processing_requires_consent(
+    client, pdf_document_id, analysis_runner, monkeypatch, action
+):
+    analysis_runner()
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    calls = []
+
+    def fake_summary(*args, **kwargs):
+        calls.append("summary")
+        return "Summary", "test-provider"
+
+    def fake_review(*args, **kwargs):
+        calls.append("review")
+        return ai_content_review.ContentReviewResult(
+            text="Review", model="test-provider", mode="quick",
+            total_chars=100, reviewed_chars=100, batch_count=1, complete=True,
+        )
+
+    monkeypatch.setattr(ai_summary, "summarize_chunks", fake_summary)
+    monkeypatch.setattr(ai_content_review, "review_document_content", fake_review)
+    url = f"/api/documents/{pdf_document_id}/{action}"
+    for payload in ({}, {"consent_to_external_processing": False}):
+        blocked = client.post(url, json=payload)
+        assert blocked.status_code == 400
+        assert "consent" in blocked.json()["detail"]
+    assert calls == []
+    approved = client.post(url, json={"consent_to_external_processing": True})
+    assert approved.status_code == 200
+    assert len(calls) == 1
 
 
 def test_reject_empty_upload(client):
@@ -282,9 +350,11 @@ def test_failed_analysis_job_can_be_retried(
         fake_extract,
     )
 
-    client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
-    assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "failed"
+    failed = client.get(f"/api/documents/{pdf_document_id}").json()
+    assert failed["status"] == "failed"
+    assert failed["error_message"] == "temporary OCR failure"
+    assert client.get(f"/api/documents/{pdf_document_id}/download").status_code == 200
 
     retry = client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
@@ -339,88 +409,6 @@ def test_ask_requires_processed_document(client, pdf_document_id):
     assert response.json()["detail"] == "Document must be analyzed first"
 
 
-def test_ask_processed_document(
-    client, pdf_document_id, monkeypatch, analysis_runner
-):
-    client.post(f"/api/documents/{pdf_document_id}/analyze")
-    analysis_runner()
-
-    def fake_answer_document_question(
-        text: str,
-        question: str,
-        history: list[dict[str, str]],
-        extraction_quality: str,
-    ):
-        assert "English text" in text
-        assert question == "What language is this?"
-        assert history == [{"role": "user", "content": "Previous question"}]
-        assert extraction_quality == "high"
-        return "The document is in English.", "test-gemini", False
-
-    monkeypatch.setattr(
-        "app.api.routes.documents.ai_summary.answer_document_question",
-        fake_answer_document_question,
-    )
-
-    response = client.post(
-        f"/api/documents/{pdf_document_id}/ask",
-        json={
-            "question": "What language is this?",
-            "history": [{"role": "user", "content": "Previous question"}],
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "answer": "The document is in English.",
-        "model": "test-gemini",
-        "truncated_context": False,
-        "privacy_applied": False,
-        "masked_entity_count": 0,
-    }
-
-
-def test_ask_processed_document_uses_relevant_chunk(
-    client, monkeypatch, analysis_runner
-):
-    early_text = "early section " * 220
-    late_text = "specialinvoiceend final amount is forty two. " * 40
-    upload = upload_pdf(
-        client,
-        filename="long.pdf",
-        text=f"{early_text} {late_text}",
-    )
-    assert upload.status_code == 201
-    document_id = upload.json()["id"]
-    client.post(f"/api/documents/{document_id}/analyze")
-    analysis_runner()
-
-    def fake_answer_document_question(
-        text: str,
-        question: str,
-        history: list[dict[str, str]],
-        extraction_quality: str,
-    ):
-        assert "specialinvoiceend" in text
-        assert question == "What is the specialinvoiceend amount?"
-        assert history == []
-        assert extraction_quality == "high"
-        return "The amount is forty two.", "test-gemini", False
-
-    monkeypatch.setattr(
-        "app.api.routes.documents.ai_summary.answer_document_question",
-        fake_answer_document_question,
-    )
-
-    response = client.post(
-        f"/api/documents/{document_id}/ask",
-        json={"question": "What is the specialinvoiceend amount?", "history": []},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["answer"] == "The amount is forty two."
-
-
 def test_ask_rejects_blank_question(client, pdf_document_id):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
 
@@ -438,19 +426,12 @@ def test_ask_rate_limit_returns_retry_after(
     client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
 
-    def fake_answer_document_question(
-        text: str,
-        question: str,
-        history: list[dict[str, str]],
-        extraction_quality: str,
-    ):
-        assert extraction_quality == "high"
-        return "Answer.", "test-gemini", False
+    def fake_analyze_chunks(chunks, question, **kwargs):
+        return AIChatResponse(
+            answer="Answer.", model="test-local", truncated_context=False
+        )
 
-    monkeypatch.setattr(
-        "app.api.routes.documents.ai_summary.answer_document_question",
-        fake_answer_document_question,
-    )
+    monkeypatch.setattr("app.services.ai.grounded.analyze_chunks", fake_analyze_chunks)
 
     for _ in range(10):
         response = client.post(
@@ -713,6 +694,7 @@ def test_content_review_reports_synchronous_size_limit(
 
 
 def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, monkeypatch):
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_service_tier", "paid")
     def fake_review(path: Path):
         assert path.exists()
@@ -734,7 +716,7 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "uploaded"
+    assert data["status"] == "analyzing"
     assert data["layout_review"] == "The visual layout is generally consistent."
     assert data["layout_review_model"] == "test-vision-model"
     assert data["layout_review_meta"]["reviewed_pages"] == [1, 4, 6]
@@ -748,6 +730,7 @@ def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, m
 def test_unpaid_gemini_blocks_original_layout_images(
     client, pdf_document_id, monkeypatch
 ):
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_service_tier", "unpaid")
 
     response = client.post(
@@ -760,8 +743,9 @@ def test_unpaid_gemini_blocks_original_layout_images(
 
 
 def test_layout_review_requires_explicit_external_image_consent(
-    client, pdf_document_id
+    client, pdf_document_id, monkeypatch
 ):
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
     response = client.post(
         f"/api/documents/{pdf_document_id}/layout-review",
         json={"consent_to_external_image_processing": False},

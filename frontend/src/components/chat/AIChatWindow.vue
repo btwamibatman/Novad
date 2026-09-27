@@ -113,13 +113,7 @@ async function toggleOpen(): Promise<void> {
   }
 }
 
-async function openChat(): Promise<void> {
-  chat.open.value = true
-  await nextTick()
-  input.value?.focus()
-}
-
-defineExpose({ openChat })
+defineExpose({ toggleOpen })
 watch(chat.open, (value) => emit('update:open', value))
 
 function changeDocument(event: Event): void {

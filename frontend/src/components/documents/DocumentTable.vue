@@ -6,12 +6,14 @@ import DocumentTableRow from './DocumentTableRow.vue'
 import DocumentUpload from './DocumentUpload.vue'
 import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useToasts } from '@/composables/useToasts'
+import { useExternalTextConsent } from '@/composables/useExternalTextConsent'
 import { useDocumentsStore } from '@/stores/documents'
 
 const { t } = useI18n()
 const documentsStore = useDocumentsStore()
 const { handle } = useApiErrorHandler()
 const { show } = useToasts()
+const requestConsent = useExternalTextConsent()
 const uploadOpen = ref(false)
 const uploadTrigger = ref<HTMLButtonElement | null>(null)
 
@@ -40,7 +42,9 @@ async function analyze(documentId: number): Promise<void> {
 
 async function summarize(documentId: number): Promise<void> {
   try {
-    await documentsStore.summarize(documentId)
+    const consent = await requestConsent()
+    if (consent === null) return
+    await documentsStore.summarize(documentId, consent)
     show(t('summary.generated'), 'success')
   } catch (error) {
     handle(error)

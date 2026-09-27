@@ -1,6 +1,14 @@
 import type { DocumentRead } from '@/types/document'
 import { languageName } from '@/utils/format'
 
+export function analysisStage(document: DocumentRead): string {
+  if (document.status === 'processed') return 'completed'
+  if (document.status === 'failed') return 'failed'
+  const stage = document.analysis_progress.stage
+  if (stage === 'queued' || stage === 'ocr' || stage === 'quality') return stage
+  return 'extracting'
+}
+
 export function documentLanguage(document: DocumentRead, locale = 'en'): string {
   const languages = Object.entries(document.language_distribution)
     .filter(([, share]) => share > 0)

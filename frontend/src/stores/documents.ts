@@ -119,18 +119,19 @@ export const useDocumentsStore = defineStore('documents', () => {
     return runDocumentAction('analyze', documentId, () => documentsApi.analyze(documentId))
   }
 
-  function summarize(documentId: number): Promise<DocumentRead> {
+  function summarize(documentId: number, consent = false): Promise<DocumentRead> {
     return runDocumentAction('summarize', documentId, () =>
-      documentsApi.summarize(documentId),
+      documentsApi.summarize(documentId, consent),
     )
   }
 
   function reviewContent(
     documentId: number,
     mode: ContentReviewMode,
+    consent = false,
   ): Promise<DocumentRead> {
     return runDocumentAction('content-review', documentId, () =>
-      documentsApi.reviewContent(documentId, mode),
+      documentsApi.reviewContent(documentId, mode, consent),
     )
   }
 

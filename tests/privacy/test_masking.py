@@ -1,6 +1,10 @@
+import json
+
 import pytest
 
+from app.core.config import settings
 from app.services.ai import summary as ai_summary
+from app.services.ai.provider import AIGenerationResult
 from app.services.ai.content_review import ContentReviewResult
 from app.services.ai import content_review as ai_content_review
 from app.services.pii_masking import (
@@ -195,57 +199,49 @@ def test_content_review_masks_chunks_and_restores_provider_output(
     assert response.json()["content_review_meta"]["privacy"]["entity_count"] == 1
 
 
-def test_ask_masks_context_question_and_history_in_one_session(
-    client,
-    pdf_document_id,
-    analysis_runner,
-    monkeypatch,
+def test_local_chat_keeps_context_question_and_history_off_external_provider(
+    client, pdf_document_id, analysis_runner, monkeypatch
 ):
     client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()
-    session = PIIMaskingSession(
-        [
-            ExactRecognizer(
-                [
-                    ("PERSON", "English text"),
-                    ("PERSON", "Иван Иванов"),
-                    ("DOC_ID", "4521-К"),
-                ]
-            )
-        ],
-        enabled=True,
-    )
-    monkeypatch.setattr(
-        "app.api.routes.documents.PIIMaskingSession",
-        lambda: session,
-    )
+    local_calls = []
 
-    def fake_answer(context, question, history, extraction_quality):
-        assert "English text" not in context
-        assert "Иван Иванов" not in question
-        assert "4521-К" not in history[0]["content"]
-        assert "[PERSON_1]" in context
-        assert "[PERSON_2]" in question
-        assert "[DOC_ID_1]" in history[0]["content"]
-        return "Ответ для [PERSON_2] по [DOC_ID_1].", "test-model", False
+    def unexpected_external_provider(*args, **kwargs):
+        pytest.fail("Local chat must not initialize an external provider")
+
+    def fake_generate(self, prompt, **kwargs):
+        local_calls.append(prompt)
+        assert "English text" in prompt
+        assert "Ivan Ivanov" in prompt
+        assert "4521-K" in prompt
+        return AIGenerationResult(
+            text=json.dumps({
+                "conclusions": [{
+                    "observation": "The document contains English text.",
+                    "citations": [{"chunk_index": 0, "quote": "English text"}],
+                }],
+                "limitations": [],
+            }),
+            model="test-local",
+        )
 
     monkeypatch.setattr(
-        ai_summary,
-        "answer_document_question",
-        fake_answer,
+        "app.services.gemini_provider.GeminiProvider", unexpected_external_provider
     )
-
+    monkeypatch.setattr(
+        "app.services.ollama_provider.OllamaProvider.generate_structured", fake_generate
+    )
     response = client.post(
         f"/api/documents/{pdf_document_id}/ask",
         json={
-            "question": "Что сделал Иван Иванов?",
-            "history": [
-                {"role": "user", "content": "Ранее обсуждали договор 4521-К"}
-            ],
+            "question": "What did Ivan Ivanov do?",
+            "history": [{"role": "user", "content": "Earlier we discussed 4521-K"}],
         },
     )
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "Ответ для Иван Иванов по 4521-К."
-    assert response.json()["privacy_applied"] is True
-    assert response.json()["masked_entity_count"] == 3
+    assert len(local_calls) == 1
+    assert response.json()["model"] == settings.ollama_model
+    assert response.json()["privacy_applied"] is False
+    assert response.json()["masked_entity_count"] == 0
+    assert response.json()["conclusions"][0]["citations"][0]["text_matched"] is True

@@ -22,7 +22,7 @@
   "tools.history.more": "Show more",
   "tools.history.help": "Active tasks always appear first. Recent finished operations appear below (up to the latest 50 tasks). Hiding an entry keeps its file; you can restore it from hidden entries.",
   "tools.refinement.change_document": "Change document",
-  "tools.refinement.no_pdf": "Upload a PDF on the Documents page to protect it, compress it or convert it to Word.",
+  "tools.refinement.no_pdf": "Add a PDF here to protect it, compress it or convert it to Word. The file will also appear on the Documents page.",
   "tools.refinement.conversion_source_help": "PDF → Word uses the selected document. For Word → PDF, choose a file below.",
   "tools.refinement.choose_word_file": "Choose Word file",
   "tools.refinement.change_file": "Change file",

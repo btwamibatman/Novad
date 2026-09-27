@@ -16,7 +16,7 @@ useDocumentPolling((error) => handle(error))
 
 <template>
   <div class="shell">
-    <AppHeader :chat-open="chatOpen" @open-chat="chatWindow?.openChat()" />
+    <AppHeader :chat-open="chatOpen" @toggle-chat="chatWindow?.toggleOpen()" />
     <RouterView />
   </div>
 

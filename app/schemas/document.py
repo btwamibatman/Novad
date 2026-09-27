@@ -8,7 +8,11 @@ DocumentReviewMode = Literal["quick", "thorough"]
 DocumentExtractionQuality = Literal["unknown", "high", "medium", "low"]
 
 
-class DocumentReviewRequest(BaseModel):
+class DocumentSummaryRequest(BaseModel):
+    consent_to_external_processing: bool = False
+
+
+class DocumentReviewRequest(DocumentSummaryRequest):
     mode: DocumentReviewMode = "quick"
 
 

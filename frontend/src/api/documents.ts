@@ -24,15 +24,19 @@ export const documentsApi = {
     return requestJson(`/api/documents/${documentId}/analyze`, { method: 'POST' })
   },
 
-  summarize(documentId: number): Promise<DocumentRead> {
-    return requestJson(`/api/documents/${documentId}/summarize`, { method: 'POST' })
+  summarize(documentId: number, consent = false): Promise<DocumentRead> {
+    return requestJson(`/api/documents/${documentId}/summarize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ consent_to_external_processing: consent }),
+    })
   },
 
-  reviewContent(documentId: number, mode: ContentReviewMode): Promise<DocumentRead> {
+  reviewContent(documentId: number, mode: ContentReviewMode, consent = false): Promise<DocumentRead> {
     return requestJson(`/api/documents/${documentId}/content-review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, consent_to_external_processing: consent }),
     })
   },
 

@@ -55,7 +55,9 @@ jobs:
         run: |
           python -c "import os, stanza; [stanza.download(lang, model_dir=os.environ['PII_MODEL_DIR'], processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
       - name: Run all backend tests
-        run: python -m pytest -q --junitxml=test-results/backend.xml
+run: |
+  mkdir -p test-results
+  python -m pytest -q --junitxml=test-results/backend.xml
       - name: Save backend test results
         if: always()
         uses: actions/upload-artifact@v4

@@ -257,7 +257,7 @@ test('analysis, AI reviews and chat retain their behavior', async ({ page }) => 
   await page.getByRole('button', { name: 'Open AI chat' }).click()
   await page.getByPlaceholder('Ask about the selected document...').fill('Question')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(page.getByText('Question')).toBeVisible()
+  await expect(page.getByText('Question', { exact: true })).toBeVisible()
   await expect(page.getByText('AI answer')).toBeVisible()
 })
 

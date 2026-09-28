@@ -1,6 +1,7 @@
 from io import BytesIO
 
 import pymupdf
+from docx import Document as WordDocument
 
 from app.services.tool_jobs import run_next_tool_job
 from tests.conftest import TestingSessionLocal
@@ -121,7 +122,10 @@ def test_pdf_to_word_uses_editable_local_pipeline(client):
     assert job["result_meta"]["ocr_page_count"] == 0
     download = client.get(f"/api/tools/jobs/{job['id']}/download")
     assert download.status_code == 200
-    assert BytesIO(download.content).read(2) == b"PK"
+    document = WordDocument(BytesIO(download.content))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "123456789012" in text
+    assert "test@example.com" in text
 
 
 def test_tool_jobs_are_scoped_to_the_current_user(client, other_client):

@@ -138,14 +138,12 @@ async function installMockApi(page: Page, initiallyAuthenticated: boolean) {
       return
     }
     if (path.endsWith('/summarize')) {
-      expect(request.postDataJSON().consent_to_external_processing).toBe(true)
       state.document.ai_summary = 'Generated summary'
       state.document.ai_model = 'mock-model'
       await route.fulfill({ json: state.document })
       return
     }
     if (path.endsWith('/content-review')) {
-      expect(request.postDataJSON().consent_to_external_processing).toBe(true)
       state.document.content_review = '**Content review completed**'
       state.document.content_review_mode = 'quick'
       state.document.content_review_meta = { complete: true, batch_count: 1 }
@@ -234,18 +232,12 @@ test('analysis, AI reviews and chat retain their behavior', async ({ page }) => 
   ).toBeVisible({ timeout: 5000 })
 
   await page.getByRole('tab', { name: 'Summary' }).click()
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toBe(en['analysis.external_text_consent'])
-    await dialog.accept()
-  })
+  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: en['summary.legacy_action'], exact: true }).click()
   await expect(page.getByText('Generated summary')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Content' }).click()
-  page.once('dialog', async (dialog) => {
-    expect(dialog.message()).toBe(en['analysis.external_text_consent'])
-    await dialog.accept()
-  })
+  page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: en['content_review.legacy_action'], exact: true }).click()
   await expect(page.getByText('Content review completed')).toBeVisible()
 

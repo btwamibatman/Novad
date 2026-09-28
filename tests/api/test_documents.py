@@ -211,9 +211,9 @@ def test_upload_pdf_with_charset_content_type(client):
     assert response.json()["content_type"] == "application/pdf"
 
 
-def test_resolve_stored_path_does_not_duplicate_storage_dir(tmp_path):
+def test_resolve_stored_path_does_not_duplicate_storage_dir(tmp_path, monkeypatch):
     relative_storage_dir = Path(os.path.relpath(tmp_path / "storage" / "uploads", Path.cwd()))
-    settings.storage_dir = str(relative_storage_dir)
+    monkeypatch.setattr(settings, "storage_dir", str(relative_storage_dir))
     stored_path = relative_storage_dir / "sample.pdf"
     stored_path.parent.mkdir(parents=True, exist_ok=True)
     stored_path.write_bytes(b"pdf")

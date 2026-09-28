@@ -1,13 +1,10 @@
-import { mkdir } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { makeDocument } from '../src/__tests__/fixtures'
 import type { DocumentRead, ToolJobRead } from '../src/types/document'
 import en from '../src/i18n/en.json' with { type: 'json' }
 import toolsEn from '../src/i18n/tools-refinement.en.json' with { type: 'json' }
 
-const reviewDirectory = resolve(import.meta.dirname, '../../artifacts/ui-review')
-const longFilename = 'Отчёт_по_производственной_практике_и_индивидуальным_заданиям_Тестовый_Пользователь_2026_окончательная_версия.pdf'
+const longFilename = 'Отчёт_по_производственной_практике_и_индивидуальным_заданиям_Абдигалым_Хамза_2026_окончательная_версия.pdf'
 const session = {
   session_id: 'ui-review-session', expires_at: '2099-01-01T00:00:00Z',
   user: { id: 1, username: 'hamza' },
@@ -132,8 +129,7 @@ async function mockApi(page: Page, overrides: Partial<MockState> = {}) {
 }
 
 async function screenshot(page: Page, name: string) {
-  await mkdir(reviewDirectory, { recursive: true })
-  await page.screenshot({ path: resolve(reviewDirectory, `${name}.png`), fullPage: true, animations: 'disabled' })
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true, animations: 'disabled' })
 }
 
 async function expectNoPageOverflow(page: Page) {

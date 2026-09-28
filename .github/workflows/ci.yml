@@ -43,7 +43,9 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip check
       - name: Run pytest
-        run: python -m pytest -q --strict-config --strict-markers --junitxml=test-results/pytest.xml
+        run: |
+          mkdir -p test-results
+          python -m pytest -q --strict-config --strict-markers --junitxml=test-results/pytest.xml
       - name: Upload backend test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

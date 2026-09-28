@@ -1,4 +1,3 @@
-import shutil
 from collections.abc import Generator
 
 import pytest
@@ -8,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models  # noqa: F401
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.database import Base, get_db
 from app.crud.user import create_user
 from app.main import app
@@ -41,21 +40,24 @@ def override_get_db() -> Generator[Session, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def reset_database(tmp_path) -> Generator[None, None, None]:
-    original_environment = settings.environment
-    original_pii_masking_enabled = settings.pii_masking_enabled
-    settings.storage_dir = str(tmp_path / "uploads")
-    settings.environment = "development"
-    settings.pii_masking_enabled = False
+def reset_database(tmp_path, monkeypatch) -> Generator[None, None, None]:
+    # Tests use application defaults, not the developer's environment or .env.
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+    defaults = Settings(_env_file=None)
+    for name in Settings.model_fields:
+        monkeypatch.setattr(settings, name, getattr(defaults, name))
+    monkeypatch.setattr(settings, "storage_dir", str(tmp_path / "uploads"))
+    monkeypatch.setattr(settings, "pii_masking_enabled", False)
     _buckets.clear()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-    _buckets.clear()
-    settings.environment = original_environment
-    settings.pii_masking_enabled = original_pii_masking_enabled
-    shutil.rmtree(settings.storage_dir, ignore_errors=True)
+    try:
+        yield
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        _buckets.clear()
+    # pytest owns tmp_path; never delete a path read from mutable settings.
 
 
 def add_user(username: str, password: str = "test password") -> None:
@@ -75,31 +77,37 @@ def login_test_client(test_client: TestClient, username: str, password: str = "t
 
 
 @pytest.fixture()
-def client() -> Generator[TestClient, None, None]:
-    app.dependency_overrides[get_db] = override_get_db
+def client(monkeypatch) -> Generator[TestClient, None, None]:
+    monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
     test_client = TestClient(app)
-    add_user("test-user")
-    login_test_client(test_client, "test-user")
-    yield test_client
-    app.dependency_overrides.clear()
+    try:
+        add_user("test-user")
+        login_test_client(test_client, "test-user")
+        yield test_client
+    finally:
+        test_client.close()
 
 
 @pytest.fixture()
-def other_client() -> Generator[TestClient, None, None]:
-    app.dependency_overrides[get_db] = override_get_db
+def other_client(monkeypatch) -> Generator[TestClient, None, None]:
+    monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
     test_client = TestClient(app)
-    add_user("other-user")
-    login_test_client(test_client, "other-user")
-    yield test_client
-    app.dependency_overrides.clear()
+    try:
+        add_user("other-user")
+        login_test_client(test_client, "other-user")
+        yield test_client
+    finally:
+        test_client.close()
 
 
 @pytest.fixture()
-def anonymous_client() -> Generator[TestClient, None, None]:
-    app.dependency_overrides[get_db] = override_get_db
+def anonymous_client(monkeypatch) -> Generator[TestClient, None, None]:
+    monkeypatch.setitem(app.dependency_overrides, get_db, override_get_db)
     test_client = TestClient(app)
-    yield test_client
-    app.dependency_overrides.clear()
+    try:
+        yield test_client
+    finally:
+        test_client.close()
 
 
 @pytest.fixture()

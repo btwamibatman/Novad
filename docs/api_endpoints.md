@@ -1,228 +1,43 @@
-# API Endpoints
+# API guide
 
-This document lists the available REST endpoints for Document Processing API.
+[Back to Novad](../README.md)
 
-The API stores uploaded PDF files on disk and stores metadata, extracted text, text metrics, AI summaries and review results in the database.
+Use [Swagger UI](http://localhost:8000/docs) for the full request/response schemas. Authentication uses a session cookie, not a bearer token. Most application routes require login; there is no public registration route.
 
-Dashboard and document endpoints require an authenticated server-side session. The
-browser receives the opaque session token in an HttpOnly cookie after login.
+| Route | Purpose |
+| --- | --- |
+| `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout` | Create, inspect, and end an authenticated session |
+| `POST /api/documents/upload`, `GET /api/documents` | Upload a PDF and list the current user's documents |
+| `GET /api/documents/{id}`, `POST /api/documents/{id}/analyze` | Inspect processing status or queue extraction again |
+| `POST /api/documents/{id}/ask` | Local Q&A, analysis, or suggestions |
+| `POST /api/documents/{id}/summarize`, `/content-review`, `/layout-review` | Summary, text review, or sampled page-image review |
+| `GET /api/documents/{id}/download`, `DELETE /api/documents/{id}` | Download or delete a document |
+| `GET /api/dashboard/summary` | Aggregate document metrics for the signed-in user |
+| `POST /api/tools/compress`, `/word-to-pdf`, `/pdf-to-word` | Queue local conversion or compression jobs |
+| `POST /api/tools/redaction/preview`, `/api/tools/jobs/{id}/apply-redaction` | Preview findings and apply confirmed regions |
+| `GET /api/tools/jobs`, `GET /api/tools/artifacts` | Tool history, results, and protected artifacts |
+| `POST /api/ai/jobs`, `GET /api/ai/jobs/{id}` | Queue and inspect protected-document AI analysis |
+| `POST /api/ai/jobs/{id}/cancel`, `DELETE /api/ai/jobs/{id}/remote-file` | Cancel analysis or request provider-file deletion |
 
-## Public Pages
+<details>
+<summary>PowerShell example: authenticate, list documents, and ask a question</summary>
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/` | Open the static Document Console |
-| GET | `/docs` | Open Swagger UI |
-| GET | `/health` | Check API status |
+Run this after uploading and processing a PDF through the web console. It prompts for credentials instead of putting a password in shell history.
 
-## Authentication
-
-| Method | Path | Description |
-| --- | --- | --- |
-| POST | `/api/auth/login` | Sign in with username and password |
-| GET | `/api/auth/me` | Read the current authenticated session and user |
-| POST | `/api/auth/logout` | Revoke the current server session |
-| GET | `/api/session` | Read the current internal session id and expiry |
-
-Command-line example using a cookie jar:
-
-```bash
-curl -c cookies.txt -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"your-password"}'
-curl -b cookies.txt http://localhost:8000/api/documents
+```powershell
+$credential = Get-Credential -UserName admin -Message 'Novad login'
+$login = @{
+    username = $credential.UserName
+    password = $credential.GetNetworkCredential().Password
+} | ConvertTo-Json
+Invoke-RestMethod http://localhost:8000/api/auth/login -Method Post -ContentType 'application/json' -Body $login -SessionVariable novadSession
+$documents = Invoke-RestMethod http://localhost:8000/api/documents -WebSession $novadSession
+$documents | Select-Object id, filename, status
+$documentId = Read-Host 'Enter the id of a processed PDF'
+$question = @{ question = 'What is this document about?'; mode = 'question' } | ConvertTo-Json
+Invoke-RestMethod "http://localhost:8000/api/documents/$documentId/ask" -Method Post -ContentType 'application/json' -Body $question -WebSession $novadSession
 ```
 
-## Dashboard
+The response includes `answer`, structured `conclusions`, `limitations`, `pages_reviewed`, and `retrieval_method`. An unprocessed document returns HTTP 400 for chat.
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/dashboard/summary` | Get total document count, processed/failed counts, storage usage and detected language distribution |
-
-Example response:
-
-```json
-{
-  "total_documents": 3,
-  "processed_documents": 2,
-  "failed_documents": 1,
-  "storage_bytes": 48219,
-  "detected_languages": {
-    "en": 2
-  }
-}
-```
-
-## Documents
-
-| Method | Path | Description | Request body |
-| --- | --- | --- | --- |
-| POST | `/api/documents/upload` | Upload a PDF document | `multipart/form-data` with `file` |
-| GET | `/api/documents` | List documents | None |
-| GET | `/api/documents/{document_id}` | Get one document by id | None |
-| POST | `/api/documents/{document_id}/analyze` | Idempotently enqueue background analysis | None |
-| POST | `/api/documents/{document_id}/summarize` | Generate AI summary for an already processed document | None |
-| POST | `/api/documents/{document_id}/content-review` | Review extracted text | JSON: `{"mode":"quick"}` or `{"mode":"thorough"}` |
-| POST | `/api/documents/{document_id}/layout-review` | Visually review selected PDF pages | JSON: `{"consent_to_external_image_processing":true}` |
-| POST | `/api/documents/{document_id}/ask` | Ask a question about relevant extracted chunks | JSON question and history |
-| GET | `/api/documents/{document_id}/download` | Download the stored file | None |
-| DELETE | `/api/documents/{document_id}` | Delete document metadata and stored file | None |
-
-Upload example:
-
-```bash
-curl -X POST http://localhost:8000/api/documents/upload \
-  -F "file=@sample.pdf"
-```
-
-Analyze example:
-
-```bash
-curl -X POST http://localhost:8000/api/documents/1/analyze
-```
-
-Summarize example:
-
-```bash
-curl -X POST http://localhost:8000/api/documents/1/summarize
-```
-
-Content and layout review examples:
-
-```bash
-curl -X POST http://localhost:8000/api/documents/1/content-review \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"quick"}'
-curl -X POST http://localhost:8000/api/documents/1/layout-review \
-  -H "Content-Type: application/json" \
-  -d '{"consent_to_external_image_processing":true}'
-```
-
-Document response example:
-
-```json
-{
-  "id": 1,
-  "filename": "sample.pdf",
-  "content_type": "application/pdf",
-  "size_bytes": 73,
-  "status": "processed",
-  "analysis_progress": {},
-  "extracted_text": "This document contains enough English text for language detection.",
-  "extraction_quality": "high",
-  "extraction_quality_meta": {"heuristic": true, "requires_manual_review": false},
-  "detected_language": "en",
-  "word_count": 9,
-  "char_count": 65,
-  "error_message": null,
-  "ai_summary": "A short summary of the uploaded document.",
-  "ai_model": "gemini-2.5-flash",
-  "ai_error": null,
-  "ai_summary_meta": {
-    "provider": "gemini",
-    "privacy": {"applied": true, "entity_count": 2, "categories": {"PERSON": 1, "DATE": 1}}
-  },
-  "content_review": "The document needs two language corrections.",
-  "content_review_model": "gemini-2.5-flash",
-  "content_review_error": null,
-  "content_review_mode": "quick",
-  "content_review_meta": {"complete": true, "batch_count": 1},
-  "layout_review": "The sampled pages are visually consistent.",
-  "layout_review_model": "gemini-2.5-flash",
-  "layout_review_error": null,
-  "layout_review_meta": {"complete": false, "reviewed_pages": [1, 5, 9]},
-  "created_at": "2026-06-29T10:00:00",
-  "updated_at": "2026-06-29T10:01:00"
-}
-```
-
-## Common Responses
-
-Successful upload requests return HTTP 201 and the created document metadata.
-
-Analyze returns HTTP 202 with status `analyzing`; poll
-`GET /api/documents/{document_id}` until status becomes `processed` or `failed`.
-Repeated analyze requests reuse the pending/running DB job. Summary and review
-requests return HTTP 200 when successful.
-
-Successful delete requests return HTTP 204 with an empty response body.
-
-If a requested document does not exist, the API returns HTTP 404:
-
-```json
-{
-  "detail": "Document with id 99 was not found"
-}
-```
-
-If a file is empty, the API returns HTTP 400:
-
-```json
-{
-  "detail": "Uploaded file is empty"
-}
-```
-
-If a file type is unsupported, the API returns HTTP 415:
-
-```json
-{
-  "detail": "Only PDF files are supported"
-}
-```
-
-If a document is summarized before analysis, the API returns HTTP 400:
-
-```json
-{
-  "detail": "Document must be analyzed first"
-}
-```
-
-If Gemini is not configured, summary generation returns HTTP 503:
-
-```json
-{
-  "detail": "GEMINI_API_KEY is not configured"
-}
-```
-
-Layout review without explicit image-processing consent returns HTTP 400. If local
-PII NER is unavailable, text AI operations return HTTP 503 without sending raw text.
-
-FastAPI returns HTTP 422 with validation details when path parameters or request data are invalid.
-
-## Local Document Tools
-
-All tool operations are user-scoped and processed by the local worker.
-
-- `GET /api/tools/jobs` — list the latest 50 tool jobs plus all unfinished jobs, including protected-copy verification. Each job includes `hidden_from_history`; hidden jobs remain accessible for workspace restoration and downloads.
-- `PATCH /api/tools/jobs/{job_id}/history` — set `{"hidden": true}` to hide a finished task from history, or `{"hidden": false}` to restore it. Does not delete files. Returns `409` while the task or protected-copy verification is unfinished.
-- `POST /api/tools/compress` — queue PDF compression (`low`, `recommended`, `extreme`).
-- `POST /api/tools/word-to-pdf` — upload DOCX, DOC, or ODT and queue PDF conversion.
-- `POST /api/tools/pdf-to-word` — queue editable DOCX creation with OCR fallback.
-- `POST /api/tools/redaction/preview` — detect selected data categories and create a review job.
-- `POST /api/tools/jobs/{job_id}/apply-redaction` — apply confirmed or manually drawn percentage-based `areas` as permanent redaction or pseudonymized labels; legacy `finding_ids` are also accepted. The result is automatically flattened and verified.
-- `GET /api/tools/jobs/{job_id}/pages/{page_number}` — render a local review preview.
-- `GET /api/tools/jobs/{job_id}/download` — download a completed derivative without replacing the original.
-- `GET /api/tools/artifacts` — list protected PDF artifacts for the current user.
-- `GET /api/tools/artifacts/{artifact_id}` — return policy, coverage, integrity hashes, and verification status.
-- `GET /api/tools/artifacts/{artifact_id}/pages/{page_number}` — preview a protected artifact page.
-- `GET /api/tools/artifacts/{artifact_id}/download` — download the protected copy.
-- `DELETE /api/tools/artifacts/{artifact_id}` — revoke linked remote AI files and delete the artifact; active AI jobs must be cancelled first.
-
-Protected artifacts are fail-closed. Only status `ready_for_ai` passes the AI gate;
-`needs_review`, `verifying`, `failed`, residual PII, incomplete detector coverage, or a
-SHA-256 lineage mismatch are rejected.
-
-## Protected PDF AI analysis
-
-- `GET /api/ai/provider-info` — disclose provider, model, service tier, retention limit, and the verified-artifact requirement.
-- `GET /api/ai/jobs` and `GET /api/ai/jobs/{job_id}` — list or resume persistent analysis jobs.
-- `POST /api/ai/jobs` — queue `summary`, `content_review`, or `layout_review` for a `ready_for_ai` artifact. Both external-processing consent flags are required.
-- `POST /api/ai/jobs/{job_id}/cancel` — cancel pending/retrying work and cooperatively stop a running worker.
-- `DELETE /api/ai/jobs/{job_id}/remote-file` — explicitly delete the provider copy and clear all shared local references.
-
-The job sends the protected PDF directly to the configured provider. A local ephemeral
-OCR index is generated from the same image-only artifact to validate page numbers and
-text evidence; it is not uploaded separately or stored in the AI job.
+</details>

@@ -1,269 +1,124 @@
-# Document Processing API
+# Novad
 
-[README](README.md) | [Technical Documentation](TECHNICAL.md)
+A PDF workspace with multilingual OCR, local AI, and reviewable redaction.
 
-A full-stack application for uploading PDF documents, extracting native or OCR text, and using AI to summarize, review, and answer questions about the content.
+Extract text from scanned documents, ask questions with source references, and inspect sensitive regions before creating a protected copy. Local AI runs through Ollama; Gemini is optional for external analysis or a second review.
 
-## Main Features
+[Get started](#quick-start) · [Architecture](#architecture) · [API guide](docs/api_endpoints.md) · [Development](docs/development.md) · [Tests](#tests-and-ci)
 
-- Secure user sessions and per-user document access
-- PDF validation, local storage, and document management
-- Asynchronous text extraction with a database-backed worker
-- Adaptive Tesseract OCR for Russian, Kazakh, and English documents
-- Language detection, text metrics, chunking, and extraction-quality checks
-- Local Qwen document Q&A, evidence-backed analysis and improvement suggestions
-- Optional Gemini analysis or second review of verified protected copies
-- Local Presidio privacy detection with Kazakh IIN/BIN/IBAN, cards, RU/KK/EN NER, OCR, faces, signatures, QR codes, and barcodes
-- Verified protected-PDF workflow: confirmed redactions are rebuilt as an image-only PDF, automatically re-scanned, and only `ready_for_ai` artifacts can be uploaded to AI
-- Persistent protected-document AI jobs with explicit provider consent, structured page evidence, retries, cancellation, and remote-file cleanup
-- Local PDF compression with basic, recommended, and extreme modes
-- Local Word-to-PDF conversion and editable PDF-to-Word beta with OCR for scans
-- Confirm-before-apply PDF redaction with personal, financial, visual, and service categories
-- Vue 3 web interface and Swagger API documentation
+![Novad document workspace showing a processed sample PDF, extracted text, language, and quality metrics](docs/assets/document-workspace.png)
 
-## Quick Start with Docker
+*Actual application running locally with a sample PDF processed by the backend. No personal documents or generated AI answers are shown. [View full-size screenshot](docs/assets/document-workspace.png).*
 
-1. Create the environment file:
+## Upload → review → use the result
 
-   Copy-Item .env.example .env
+1. **Upload a PDF.** The worker extracts native text or applies OCR for scanned pages, then reports processing progress and text quality.
+2. **Review what was extracted.** Open the document to inspect its text and language metrics. For a protected copy, open Tools, review detected sensitive regions, and adjust the redaction rectangles.
+3. **Use the result.** Ask local AI a question with source references, or apply redactions and download the protected PDF. Protected-copy AI analysis becomes available after the copy passes verification.
 
-2. Start local Ollama using the setup below. Add `GEMINI_API_KEY` to `.env`
-   only if external analysis or an additional external review is required.
+## What you can do
 
-   Keep `GEMINI_SERVICE_TIER=unpaid` for the conservative default. The primary UI
-   then allows external document analysis only through a verified protected copy.
+- **Read native and scanned PDFs** with Russian, Kazakh, and English OCR, extraction-quality checks, and a searchable document list.
+- **Ask questions locally** or request summaries and reviews. Chat combines lexical search with local embeddings and returns source quotes and limitations.
+- **Review sensitive data before sharing.** Local detection includes names, Kazakhstan identifiers, financial details, and visual regions. Confirmed redactions are rebuilt into an image-only PDF and re-scanned before protected AI analysis.
+- **Prepare documents in one workspace:** compress PDFs, convert Word to PDF, or extract editable Word documents from PDFs. PDF-to-Word is beta.
 
-3. Start PostgreSQL, the API, the analysis worker, and the development frontend:
+The web console includes authenticated user workspaces, English/Russian translations, and light/dark themes.
 
-   docker compose up --build -d
+## Architecture
 
-4. Apply database migrations and create a user:
-
-   docker compose exec api alembic upgrade head
-   docker compose exec api python -m app.create_user admin
-
-5. Open the application:
-
-Web console: `http://localhost:8000`
-Swagger UI: `http://localhost:8000/docs`
-Health check: `http://localhost:8000/health`
-
-### Development with automatic updates
-
-After the initial build, start everything with `docker compose up -d` and open
-`http://localhost:8000`. No separate `npm run dev` terminal is needed.
-Docker Compose automatically loads `docker-compose.override.yml` (use a current
-Docker Compose v2 with support for `!reset`). Vite serves the interface on port
-8000 and proxies API, health, and documentation requests to FastAPI internally.
-
-logs for frontend api 
-```powershell
-docker compose logs -f frontend api
+```mermaid
+flowchart LR
+    UI[Vue web console] -->|HTTP API| API[FastAPI]
+    API --> DB[(PostgreSQL)]
+    API --> Files[Shared PDF storage]
+    Worker[Processing worker] -->|Poll and update jobs| DB
+    Worker --> Files
+    Worker --> OCR[OCR and PDF tools]
+    API --> Ollama[Local Ollama]
+    Worker --> Ollama
+    API -.->|Optional, with consent| Gemini[Gemini]
+    Worker -.->|Optional, with consent| Gemini
 ```
 
-After changing frontend dependencies, run `docker compose restart frontend`.
-For worker code changes, run `docker compose restart analysis-worker`.
-Changes to `.env` require container recreation; Python dependencies or Dockerfile
-changes require an image rebuild, and database schema changes require migrations.
+The API handles authentication, documents, and interactive requests. A separate worker processes database-backed extraction, tool, and protected-AI jobs. Both share local file storage. PostgreSQL holds metadata, text chunks, and job state; no separate message broker is required.
 
+| Layer | Main technologies |
+| --- | --- |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16 |
+| Frontend | Vue 3, TypeScript, Pinia, Vite; Node.js 24 for builds |
+| Documents | PyMuPDF, OpenCV, Tesseract, LibreOffice, Ghostscript |
+| Privacy and AI | Presidio, Stanza, Ollama; optional Gemini |
+| Tests | pytest, Vitest, Playwright, GitHub Actions |
 
-Stop the services with:
+Implementation details: [hybrid retrieval](app/services/documents/retrieval.py), [protected-copy verification](app/services/documents/artifacts.py), and [persistent AI jobs](app/services/ai/jobs.py).
 
-docker compose down
+## Quick start
 
+Use Docker Desktop, Docker Compose v2 with `!reset` support, and a running host Ollama instance for local AI. The commands below use PowerShell and assume a **new, empty database**.
 
-## Local AI setup: Ollama and Qwen3.5-4B
+```powershell
+git clone https://github.com/btwamibatman/Novad.git
+cd Novad
+Copy-Item .env.example .env
+```
 
-This setup uses Windows with Docker Desktop. Ollama runs on the laptop and serves
-Qwen over HTTP; the API and analysis worker run in Docker and connect to it.
-The model stays on the laptop and does not need to be copied into the Docker image.
+Review `.env`: choose database credentials and update `DATABASE_URL` to match. Keep `AI_PROVIDER=ollama`; no Gemini key is needed. Follow the [host Ollama configuration](docs/development.md#2-prepare-local-ai), then download the models:
 
-
-### 1. Download Ollama and the model
-
-Download from the [official Ollama Windows page](https://ollama.com/download/windows)
-and start the installed application. 
-
-Open a new PowerShell terminal:
-
-ollama --version
+```powershell
 ollama pull qwen3.5:4b
 ollama pull qwen3-embedding:0.6b
-ollama run qwen3.5:4b
-
-
-Send a short question to test the model, then enter `/bye` to leave the chat.
-The model download is approximately 3.4 GB; runtime RAM/VRAM usage is higher and
-depends on context size. Run `ollama list` to see downloaded models and `ollama ps`
-after a request to see loaded models and CPU/GPU usage.
-
-### 2. Configure the local Ollama server
-
-Ollama runs in the background on port `11434`. Do not start a second `ollama serve`
-process while the desktop application is already serving requests.
-
-For an initial laptop configuration, add these **Windows user environment
-variables** through "Edit environment variables for your account":
-
-```dotenv
-OLLAMA_CONTEXT_LENGTH=16384
-OLLAMA_NUM_PARALLEL=1
-OLLAMA_NO_CLOUD=1
 ```
 
-These set an initial context limit, one parallel request, and local-only operation.
-Quit Ollama from the system tray and reopen it after changing the variables.
-Putting them in the project's `.env` does not configure the Ollama process on Windows.
-See the [Ollama configuration FAQ](https://docs.ollama.com/faq) for details.
-
-Check the local server:
+Build, initialize the database, and create your sign-in account:
 
 ```powershell
-Invoke-RestMethod http://localhost:11434/api/tags
+docker compose up -d db
+docker compose build api
+docker compose run --rm api python -c "from app.core.database import init_db; init_db()"
+docker compose run --rm api alembic upgrade head
+docker compose run --rm api python -m app.create_user admin
+docker compose up -d
 ```
 
-The response should list `qwen3.5:4b`.
+The first build downloads OCR/NER dependencies. User creation prompts for a password. Open **[localhost:8000](http://localhost:8000)** and sign in; API documentation is at **[/docs](http://localhost:8000/docs)**. Keep the worker running for uploads and tool jobs to finish.
 
-### 3. Pass the connection settings to Docker
+For existing databases, host development, service logs, stopping services, and the bundled frontend, see the [setup guide](docs/development.md). See [configuration](docs/configuration.md) for limits, model settings, and provider consent.
 
-Ensure the project's `.env` contains these values (also provided in `.env.example`):
+## Processing boundaries
 
-```dotenv
-AI_PROVIDER=ollama
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=qwen3.5:4b
-OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
-OLLAMA_TIMEOUT_SECONDS=180
-OLLAMA_CONTEXT_LENGTH=16384
-SEMANTIC_SEARCH_ENABLED=true
-```
+Chat stays local. Protected-copy jobs support local analysis, Gemini analysis, or local analysis followed by a Gemini review. External modes require explicit consent; local inference failures do not trigger an automatic cloud fallback.
 
-Both `api` and `analysis-worker` already use `env_file: .env` in Compose, so no
-Dockerfile changes, model volumes, or additional port mappings are required.
-Docker passes these values into the containers; Python must read them and send
-the HTTP request. Docker does not automatically redirect AI calls.
+Automatic redaction checks can miss sensitive content, and matching a source quote does not prove an AI conclusion. Review the extracted text, protected copy, and results before relying on them. See the [protected-document workflow](docs/configuration.md#protected-documents-and-ai) for verification states and provider-file cleanup.
 
-Inside a container, `localhost` refers to that container. Docker Desktop provides
-`host.docker.internal` to reach the laptop; see
-[Docker Desktop networking](https://docs.docker.com/desktop/features/networking/).
-For a Python process running directly on Windows, use `http://localhost:11434` instead.
+## Tests and CI
 
-From the project directory, start or recreate the services to load the settings:
+After installing the [development dependencies](docs/development.md#development), run backend tests from the repository root:
 
 ```powershell
-docker compose up -d --force-recreate api analysis-worker
+python -m pytest -q
 ```
 
-### 4. Verify a model response from Docker
-
-Run this block in PowerShell from the project directory. It uses the container's
-connection settings and sends a real inference request using
-[Ollama's chat API](https://docs.ollama.com/api/chat):
+For frontend tests and a type-checked build:
 
 ```powershell
-docker compose exec api python -c "from app.services.ollama_provider import OllamaProvider; print(OllamaProvider().generate_text('Reply with: ready', max_output_tokens=20).text)"
-```
-
-### Document workflows
-
-- Chat always runs locally. Choose a question, whole-document text analysis, or
-  improvement suggestions. Each conclusion includes source quotes and page numbers
-  where available. Suggestions are labeled separately from document facts.
-- Questions use BM25 plus local multilingual embeddings with reciprocal-rank fusion.
-  If embeddings are unavailable, the answer discloses that only word search was used.
-  A bounded in-memory vector cache avoids repeatedly embedding the same chunks;
-  it is rebuilt after restart and does not require a database migration.
-- Whole-document chat analysis processes all extracted chunks in batches. Large
-  documents can take several minutes. Visual layout is assessed in the protected
-  document workflow, not inferred from chat text.
-- In Tools, a verified protected copy supports three modes: local analysis, local
-  analysis plus external review, or external analysis alone. Local is the default.
-  External modes require both existing consent checkboxes. Local failure never
-  causes an automatic cloud fallback.
-- Combined jobs save the local analysis before sending the protected copy and its
-  local draft for external review. The two analyses remain separate, including
-  disagreements. A cloud failure leaves the saved local result visible.
-- Quote matching checks the actual supplied text, preserving word order and
-  punctuation except Unicode/whitespace normalization. It is not an entailment
-  check: matching evidence does not prove a conclusion. OCR uncertainty and
-  unsupported numbers in chat conclusions are marked for review.
-- Local protected analysis processes text page by page; layout uses the configured
-  page sample. Coverage and result limits are disclosed. Cross-section consistency
-  needs separate review; neither model is treated as an authority.
-
-`AI_PROVIDER` selects the provider for the existing quick summary, text review and
-original-page layout endpoints. It does not override explicit protected job modes
-or route the local chat to the cloud. Existing external files are cleaned up using
-the provider stored on their jobs even after the default provider changes.
-
-Keep `OLLAMA_NO_CLOUD=1` in the Ollama server's Windows environment. The application
-accepts only localhost / Docker host Ollama URLs, rejects cloud model names, and
-disables HTTP proxies and redirects for local inference. No model name is displayed
-in the interface. Models remain server-side metadata for debugging and job identity.
-
-API additions: `POST /api/documents/{id}/ask` accepts `mode` (`question`, `analysis`,
-`suggestions`) and returns structured `conclusions`, `limitations`, `pages_reviewed`
-and `retrieval_method` alongside the existing answer fields. `POST /api/ai/jobs`
-accepts `processing_mode` (`local`, `review`, `external`), defaulting to `local`.
-Combined results include `external_review` separately from the primary local result.
-
-
-## Local Development
-
-Local development requires Python 3.12, LibreOffice, Ghostscript, and Tesseract with `rus`, `kaz`, `eng`, and `osd` language data. The Docker image installs all of them.
-
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --index-url https://download.pytorch.org/whl/cpu -r requirements-torch-cpu.txt
-python -m pip install -r requirements-dev.txt
-python -c "import stanza; [stanza.download(lang, model_dir='.stanza_resources', processors='tokenize,ner', verbose=False) for lang in ('kk', 'ru', 'en')]"
-python -m app.create_user admin
-uvicorn app.main:app --reload
-
-For local Windows development, set `PII_MODEL_DIR=.stanza_resources` in `.env`.
-Docker uses `/opt/stanza_resources` and downloads the same models during the image build.
-
-
-Run the analysis worker in a second terminal:
-
-.\.venv\Scripts\Activate.ps1
-python -m app.analysis_worker
-
-Successful PDF uploads automatically queue text extraction, OCR when needed, and
-document metrics. Keep the worker running; otherwise documents stay queued. Failed
-processing keeps the uploaded file, and **Retry** queues the same document again.
-AI summaries and reviews remain separate actions. External text processing requires
-explicit consent (`consent_to_external_processing: true` for the summary and content
-review endpoints); local processing does not require this flag.
-
-
-For frontend development:
-
 cd frontend
-npm install
-npm run dev
-
-## Tests
-
-pytest
-cd frontend
+npm ci
 npm test
 npm run build
+npx playwright install chromium
+npm run test:e2e
+```
 
+[GitHub Actions](.github/workflows/ci.yml) runs these checks on pushes and pull requests. Backend tests use SQLite; browser tests use intercepted API responses. Live-model quality and full browser-to-backend integration are outside this suite. See the [test guide](tests/README.md) for coverage boundaries.
 
-This project is intended for educational and demonstration use. AI and OCR results are advisory and should be manually verified for important documents.
+## Documentation
 
-## Protected document flow
+- [Setup and development](docs/development.md) — Docker, local Python/Vite, migrations, and repository structure.
+- [Configuration and AI processing](docs/configuration.md) — environment settings, protected copies, and consent.
+- [API guide](docs/api_endpoints.md) — main routes and an authenticated request example.
+- [Test suite](tests/README.md) — setup, test organization, and verification limits.
 
-1. Open **Tools**, select a PDF and run the confidential-data preview.
-2. Review the locally detected areas, add or remove rectangles, and choose black
-   redaction or stable pseudonym labels.
-3. Apply the selection. The worker removes interactive PDF structures and rebuilds
-   every page from rendered pixels, so hidden object data and selectable source text
-   are not copied into the derivative.
-4. Verification runs automatically on every page using local OCR and the same privacy
-   taxonomy. Residual findings, unchecked pages, detector failures, or unsafe PDF
-   structures produce `needs_review`; only a clean artifact becomes `ready_for_ai`.
-5. After the user confirms the provider and retention policy, AI receives only that
-   verified artifact. The default deletes the provider copy after analysis; failed
-   cleanup remains visible and can be retried.
+## License
+
+No license file is included in the repository.

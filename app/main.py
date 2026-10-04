@@ -9,10 +9,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import create_session, init_db
+from app.core.readiness import check_database_ready
 from app.crud.session import cleanup_expired_sessions
 from app.middleware.request_size import RequestSizeLimitMiddleware
 
@@ -21,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
 WEB_DIST_DIR = WEB_DIR / "dist"
 WEB_INDEX = WEB_DIST_DIR / "index.html"
+READINESS_TIMEOUT_SECONDS = 3
 
 
 async def cleanup_expired_sessions_loop() -> None:
@@ -89,3 +92,17 @@ def health_check() -> dict[str, str]:
         "status": "ok",
         "project": settings.project_name,
     }
+
+
+@app.get("/ready", tags=["health"])
+async def readiness_check() -> dict[str, str]:
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(check_database_ready), timeout=READINESS_TIMEOUT_SECONDS,
+        )
+    except (SQLAlchemyError, TimeoutError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable",
+        ) from None
+    return {"status": "ready"}

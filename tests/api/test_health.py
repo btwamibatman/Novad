@@ -1,4 +1,53 @@
+import asyncio
+from threading import Event
+import time
+
+from fastapi import HTTPException
+import pytest
+from sqlalchemy.exc import OperationalError
+
 from app import main as main_module
+from app.core.config import settings
+
+
+def test_ready_checks_database_without_authentication(anonymous_client, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "sqlite://")
+
+    response = anonymous_client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_database_outage_fails_ready_but_not_health(anonymous_client, monkeypatch):
+    def unavailable():
+        raise OperationalError("SELECT 1", {}, Exception("private connection details"))
+
+    monkeypatch.setattr(main_module, "check_database_ready", unavailable)
+
+    response = anonymous_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Database is unavailable"}
+    assert anonymous_client.get("/health").status_code == 200
+
+
+def test_ready_times_out_even_when_database_resolution_blocks(monkeypatch):
+    release = Event()
+    monkeypatch.setattr(main_module, "READINESS_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(main_module, "check_database_ready", lambda: release.wait(2))
+
+    async def check():
+        started = time.monotonic()
+        try:
+            with pytest.raises(HTTPException) as error:
+                await main_module.readiness_check()
+            assert error.value.status_code == 503
+            assert time.monotonic() - started < 1
+        finally:
+            release.set()
+
+    asyncio.run(check())
 
 
 def test_health_returns_ok(client):

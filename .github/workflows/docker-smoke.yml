@@ -1,0 +1,32 @@
+name: Docker smoke
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: PostgreSQL, API and worker smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build and exercise Docker stack
+        run: python tests/smoke/run.py
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose --project-name novad-docker-smoke --env-file tests/smoke/compose.env -f docker-compose.yml -f tests/smoke/compose.yml logs --no-color
+      - name: Always remove smoke containers and volumes
+        if: always()
+        run: docker compose --project-name novad-docker-smoke --env-file tests/smoke/compose.env -f docker-compose.yml -f tests/smoke/compose.yml down -v --remove-orphans

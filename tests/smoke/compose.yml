@@ -1,0 +1,32 @@
+services:
+  db:
+    env_file: !reset []
+    environment: !override
+      POSTGRES_USER: novad_smoke
+      POSTGRES_PASSWORD: smoke-only-password
+      POSTGRES_DB: novad_smoke
+  api:
+    image: novad-docker-smoke:local
+    env_file: !reset []
+    environment: !override
+      DATABASE_URL: postgresql+psycopg://novad_smoke:smoke-only-password@db:5432/novad_smoke
+      STORAGE_DIR: /app/storage/uploads
+      AI_PROVIDER: ollama
+      GEMINI_API_KEY: ""
+    ports: !reset []
+    volumes: !override
+      - smoke_storage:/app/storage
+      - ./tests/smoke:/app/smoke:ro
+  analysis-worker:
+    image: novad-docker-smoke:local
+    env_file: !reset []
+    environment: !override
+      DATABASE_URL: postgresql+psycopg://novad_smoke:smoke-only-password@db:5432/novad_smoke
+      STORAGE_DIR: /app/storage/uploads
+      AI_PROVIDER: ollama
+      GEMINI_API_KEY: ""
+    volumes: !override
+      - smoke_storage:/app/storage
+
+volumes:
+  smoke_storage:

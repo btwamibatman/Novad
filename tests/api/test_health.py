@@ -1,4 +1,28 @@
 from app import main as main_module
+from app.core.config import settings
+from sqlalchemy.exc import OperationalError
+
+
+def test_ready_checks_database_without_authentication(anonymous_client, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "sqlite://")
+
+    response = anonymous_client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_database_outage_fails_ready_but_not_health(anonymous_client, monkeypatch):
+    def unavailable():
+        raise OperationalError("SELECT 1", {}, Exception("private connection details"))
+
+    monkeypatch.setattr(main_module, "check_database_ready", unavailable)
+
+    response = anonymous_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Database is unavailable"}
+    assert anonymous_client.get("/health").status_code == 200
 
 
 def test_health_returns_ok(client):

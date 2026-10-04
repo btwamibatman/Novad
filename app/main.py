@@ -9,10 +9,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import create_session, init_db
+from app.core.readiness import check_database_ready
 from app.crud.session import cleanup_expired_sessions
 from app.middleware.request_size import RequestSizeLimitMiddleware
 
@@ -89,3 +91,15 @@ def health_check() -> dict[str, str]:
         "status": "ok",
         "project": settings.project_name,
     }
+
+
+@app.get("/ready", tags=["health"])
+def readiness_check() -> dict[str, str]:
+    try:
+        check_database_ready()
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is unavailable",
+        ) from None
+    return {"status": "ready"}

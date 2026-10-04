@@ -20,6 +20,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
     logging: *default-logging
 
   api:
@@ -79,6 +80,12 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     logging: *default-logging
 
   analysis-worker:
@@ -112,6 +119,12 @@ services:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker_health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     logging: *default-logging
 
 volumes:

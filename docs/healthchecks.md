@@ -13,8 +13,11 @@ and the development Vite service uses Node's built-in `fetch`.
 
 `/health` is API liveness and remains HTTP 200 during a database outage.
 `/ready` returns HTTP 503 when the database cannot be reached. PostgreSQL
-connection and query timeouts are each two seconds; the HTTP probe has a
-four-second timeout. Neither endpoint contacts Ollama or Gemini.
+connection and query timeouts are each two seconds. The endpoint has an overall
+three-second deadline, including slow DNS; the HTTP probe has a four-second
+timeout. Neither endpoint contacts Ollama or Gemini. A timed-out database probe
+can finish in the background because Python cannot cancel an in-flight blocking
+driver call; probes use the asyncio executor, separate from ordinary sync routes.
 
 The worker touches `/tmp/novad-worker-heartbeat` every ten seconds, after database
 initialization. This file lives in the container's writable layer, not the shared

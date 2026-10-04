@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
 WEB_DIST_DIR = WEB_DIR / "dist"
 WEB_INDEX = WEB_DIST_DIR / "index.html"
+READINESS_TIMEOUT_SECONDS = 3
 
 
 async def cleanup_expired_sessions_loop() -> None:
@@ -94,10 +95,12 @@ def health_check() -> dict[str, str]:
 
 
 @app.get("/ready", tags=["health"])
-def readiness_check() -> dict[str, str]:
+async def readiness_check() -> dict[str, str]:
     try:
-        check_database_ready()
-    except SQLAlchemyError:
+        await asyncio.wait_for(
+            asyncio.to_thread(check_database_ready), timeout=READINESS_TIMEOUT_SECONDS,
+        )
+    except (SQLAlchemyError, TimeoutError):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is unavailable",

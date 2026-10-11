@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
+from collections import deque
+from dataclasses import dataclass, field
 from time import monotonic
 
 from fastapi import HTTPException, status
@@ -9,7 +10,29 @@ from fastapi import HTTPException, status
 WINDOW_SECONDS = 60
 
 _lock = asyncio.Lock()
-_buckets: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+
+
+@dataclass
+class _Bucket:
+    timestamps: deque[float] = field(default_factory=deque)
+    window_seconds: int = WINDOW_SECONDS
+
+
+_buckets: dict[tuple[str, str], _Bucket] = {}
+_last_cleanup_at = 0.0
+
+
+def _remove_stale_buckets(now: float) -> None:
+    global _last_cleanup_at
+    if now - _last_cleanup_at < WINDOW_SECONDS:
+        return
+
+    for key, bucket in list(_buckets.items()):
+        while bucket.timestamps and now - bucket.timestamps[0] >= bucket.window_seconds:
+            bucket.timestamps.popleft()
+        if not bucket.timestamps:
+            _buckets.pop(key, None)
+    _last_cleanup_at = now
 
 
 async def enforce_rate_limit(
@@ -23,7 +46,10 @@ async def enforce_rate_limit(
     key = (session_id, bucket)
 
     async with _lock:
-        timestamps = _buckets[key]
+        _remove_stale_buckets(now)
+        state = _buckets.setdefault(key, _Bucket(window_seconds=window_seconds))
+        state.window_seconds = window_seconds
+        timestamps = state.timestamps
         while timestamps and now - timestamps[0] >= window_seconds:
             timestamps.popleft()
 

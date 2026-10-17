@@ -52,4 +52,46 @@ describe('requestJson', () => {
       requestJson<void>('/api/auth/logout', { method: 'POST' }),
     ).resolves.toBeUndefined()
   })
+
+  it.each([
+    { status: 401, body: '{invalid JSON' },
+    { status: 429, body: '{invalid JSON' },
+    { status: 503, body: '' },
+  ])('preserves HTTP error $status with invalid JSON', async ({ status, body }) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(body, {
+          status,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '17',
+          },
+        }),
+      ),
+    )
+
+    const error = await requestJson('/api/documents').catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({
+      status,
+      retryAfter: '17',
+      payload: body,
+    })
+  })
+
+  it('rejects malformed JSON in a successful response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('{invalid JSON', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    await expect(requestJson('/health')).rejects.toBeInstanceOf(SyntaxError)
+  })
 })

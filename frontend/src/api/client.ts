@@ -44,9 +44,18 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
   }
 
   const contentType = response.headers.get('content-type') ?? ''
-  const payload = contentType.includes('application/json')
-    ? ((await response.json()) as ApiErrorPayload)
-    : await response.text()
+  const body = await response.text()
+  let payload: ApiErrorPayload | string | null = body
+  if (contentType.includes('application/json')) {
+    try {
+      payload = JSON.parse(body) as ApiErrorPayload | null
+    } catch (error) {
+      // Preserve HTTP error metadata even when a server/proxy sends invalid JSON.
+      if (response.ok) {
+        throw error
+      }
+    }
+  }
 
   if (!response.ok) {
     throw new ApiError(

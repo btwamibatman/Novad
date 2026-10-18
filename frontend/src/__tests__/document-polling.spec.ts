@@ -43,6 +43,8 @@ describe('document polling', () => {
       await vi.advanceTimersByTimeAsync(3000)
 
       expect(load).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(load).toHaveBeenCalledTimes(2)
     } finally {
       scope.stop()
     }
@@ -60,7 +62,8 @@ describe('document polling', () => {
         }),
     )
     const scope = effectScope()
-    const polling = scope.run(() => useDocumentPolling(vi.fn()))
+    const onError = vi.fn()
+    const polling = scope.run(() => useDocumentPolling(onError))
 
     if (!polling) {
       throw new Error('Polling scope was not created')
@@ -78,5 +81,41 @@ describe('document polling', () => {
     expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(3000)
     expect(load).toHaveBeenCalledTimes(1)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('does not overlap slow requests when documents change', async () => {
+    const store = useDocumentsStore()
+    store.documents = [makeDocument({ status: 'analyzing' })]
+    let finishLoad: () => void = () => undefined
+    const load = vi.spyOn(store, 'load').mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishLoad = resolve
+        }),
+    )
+    const scope = effectScope()
+    const polling = scope.run(() => useDocumentPolling(vi.fn()))
+
+    if (!polling) {
+      throw new Error('Polling scope was not created')
+    }
+
+    try {
+      polling.schedule()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(load).toHaveBeenCalledTimes(1)
+
+      store.documents = [makeDocument({ status: 'analyzing', filename: 'updated.pdf' })]
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(load).toHaveBeenCalledTimes(1)
+
+      finishLoad()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(load).toHaveBeenCalledTimes(2)
+    } finally {
+      scope.stop()
+      finishLoad()
+    }
   })
 })

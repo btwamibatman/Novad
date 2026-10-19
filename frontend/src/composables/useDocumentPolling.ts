@@ -8,6 +8,7 @@ export function useDocumentPolling(onError: (error: unknown) => void) {
   const documentsStore = useDocumentsStore()
   let timer: number | null = null
   let stopped = false
+  let inFlight = false
 
   function clearTimer(): void {
     if (timer !== null) {
@@ -20,16 +21,22 @@ export function useDocumentPolling(onError: (error: unknown) => void) {
     clearTimer()
     if (
       stopped ||
+      inFlight ||
       !documentsStore.documents.some((document) => document.status === 'analyzing')
     ) {
       return
     }
     timer = window.setTimeout(async () => {
       timer = null
+      inFlight = true
       try {
         await documentsStore.load(false)
       } catch (error) {
-        onError(error)
+        if (!stopped) {
+          onError(error)
+        }
+      } finally {
+        inFlight = false
         scheduleNext()
       }
     }, POLL_INTERVAL_MS)

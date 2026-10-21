@@ -121,4 +121,5 @@ npm run test:e2e
 
 ## License
 
-No license file is included in the repository.
+The project's original source code is licensed under the [MIT License](LICENSE).
+Third-party dependencies remain subject to their respective licenses.

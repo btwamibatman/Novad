@@ -6,13 +6,14 @@ import sharedRefinementEn from './shared-refinement.en.json'
 import sharedRefinementRu from './shared-refinement.ru.json'
 import toolsRefinementEn from './tools-refinement.en.json'
 import toolsRefinementRu from './tools-refinement.ru.json'
+import { readStoredValue } from '@/utils/storage'
 
 export type AppLocale = 'en' | 'ru'
 
 export const supportedLocales: AppLocale[] = ['en', 'ru']
 
 function initialLocale(): AppLocale {
-  const stored = localStorage.getItem('document-console-language')
+  const stored = readStoredValue('document-console-language')
   return supportedLocales.includes(stored as AppLocale) ? (stored as AppLocale) : 'en'
 }
 

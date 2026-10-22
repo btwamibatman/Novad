@@ -7,6 +7,7 @@ import { useApiErrorHandler } from '@/composables/useApiErrorHandler'
 import { useAuthStore } from '@/stores/auth'
 import { useDocumentsStore } from '@/stores/documents'
 import type { AIChatMessage, AIChatMode } from '@/types/document'
+import { readStoredValue, writeStoredValue } from '@/utils/storage'
 
 interface StoredChat {
   expires_at: string
@@ -60,7 +61,7 @@ export function useDocumentChat() {
     }
     try {
       const stored = JSON.parse(
-        sessionStorage.getItem(storageKey(documentId)) || 'null',
+        readStoredValue(storageKey(documentId), sessionStorage) || 'null',
       ) as StoredChat | null
       if (!stored || stored.expires_at !== authStore.session.expires_at) {
         return []
@@ -76,12 +77,13 @@ export function useDocumentChat() {
       return
     }
     const limitedMessages = nextMessages.slice(-40)
-    sessionStorage.setItem(
+    writeStoredValue(
       storageKey(documentId),
       JSON.stringify({
         expires_at: authStore.session.expires_at,
         messages: limitedMessages,
       }),
+      sessionStorage,
     )
     if (selectedDocumentId.value === documentId) {
       messages.value = limitedMessages
@@ -153,7 +155,7 @@ export function useDocumentChat() {
         return false
       }
       writeMessages(requestDocumentId, [
-        ...readMessages(requestDocumentId),
+        ...messages.value,
         {
           role: 'assistant',
           conclusions: response.conclusions,
@@ -199,9 +201,13 @@ export function useDocumentChat() {
       return
     }
     const prefix = `document-console-chat:${sessionId}:`
-    Object.keys(sessionStorage)
-      .filter((key) => key.startsWith(prefix))
-      .forEach((key) => sessionStorage.removeItem(key))
+    try {
+      Object.keys(sessionStorage)
+        .filter((key) => key.startsWith(prefix))
+        .forEach((key) => sessionStorage.removeItem(key))
+    } catch {
+      // Storage may be unavailable under browser privacy or security policies.
+    }
   }
 
   watch(

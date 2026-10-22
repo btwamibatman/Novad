@@ -86,6 +86,36 @@ describe('document chat requests', () => {
     wrapper.unmount()
   })
 
+  it('continues in memory when session storage is unavailable', async () => {
+    sessionStorage.setItem('document-console-chat:chat-test:1', '{}')
+    const originalGetItem = Storage.prototype.getItem
+    const originalSetItem = Storage.prototype.setItem
+    const originalRemoveItem = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key) {
+      if (this === sessionStorage) throw new DOMException('Access denied', 'SecurityError')
+      return originalGetItem.call(this, key)
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === sessionStorage) throw new DOMException('Access denied', 'SecurityError')
+      return originalSetItem.call(this, key, value)
+    })
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key) {
+      if (this === sessionStorage) throw new DOMException('Access denied', 'SecurityError')
+      return originalRemoveItem.call(this, key)
+    })
+    vi.spyOn(documentsApi, 'ask').mockResolvedValue(answer)
+
+    const { wrapper } = await setup()
+    await wrapper.get('textarea').setValue('Question without storage')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.ai-chat-message.user')).toHaveLength(1)
+    expect(wrapper.findAll('.ai-chat-message.assistant')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Answer ready')
+    expect(() => wrapper.unmount()).not.toThrow()
+  })
+
   it.each([
     [new TypeError('Failed to fetch'), 'Check your connection'],
     [new ApiError('Too many requests', 429, null, '30'), '30'],

@@ -221,6 +221,20 @@ def test_resolve_stored_path_does_not_duplicate_storage_dir(tmp_path, monkeypatc
     assert resolve_stored_path(str(stored_path)) == stored_path
 
 
+def test_resolve_stored_path_ignores_same_named_file_in_working_directory(
+    tmp_path, monkeypatch
+):
+    storage_dir = tmp_path / "uploads"
+    working_dir = tmp_path / "working"
+    storage_dir.mkdir()
+    working_dir.mkdir()
+    (working_dir / "sample.pdf").write_bytes(b"unrelated")
+    monkeypatch.chdir(working_dir)
+    monkeypatch.setattr(settings, "storage_dir", str(storage_dir))
+
+    assert resolve_stored_path("sample.pdf") == storage_dir / "sample.pdf"
+
+
 def test_list_and_get_document(client, pdf_document_id):
     response = client.get("/api/documents")
     assert response.status_code == 200

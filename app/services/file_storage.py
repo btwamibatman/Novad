@@ -114,9 +114,14 @@ async def save_upload(file: UploadFile) -> tuple[str, str, str, str, int]:
 
 def resolve_stored_path(stored_path: str) -> Path:
     path = Path(stored_path)
-    if path.is_absolute() or path.exists():
+    if path.is_absolute():
         return path
-    return Path(settings.storage_dir) / path
+    storage_dir = Path(settings.storage_dir)
+    try:
+        path.relative_to(storage_dir)
+    except ValueError:
+        return storage_dir / path
+    return path
 
 
 def remove_stored_file(stored_path: str) -> None:

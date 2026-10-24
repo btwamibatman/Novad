@@ -102,10 +102,40 @@ function reviewJob(): ToolJobRead {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((yes) => { resolve = yes })
+  return { promise, resolve }
+}
+
 describe('ToolsView protected workflow restoration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     for (const key of Object.keys(mocks.routeQuery)) delete mocks.routeQuery[key]
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('does not overlap workspace polling requests', async () => {
+    vi.useFakeTimers()
+    mocks.listJobs.mockResolvedValue([{ ...reviewJob(), status: 'running' }])
+    mocks.listArtifacts.mockResolvedValue([])
+    const wrapper = shallowMount(ToolsView)
+    await flushPromises()
+
+    const jobs = deferred<ToolJobRead[]>()
+    const artifacts = deferred<never[]>()
+    mocks.listJobs.mockReturnValue(jobs.promise)
+    mocks.listArtifacts.mockReturnValue(artifacts.promise)
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(mocks.listJobs).toHaveBeenCalledTimes(2)
+    expect(mocks.listArtifacts).toHaveBeenCalledTimes(2)
+
+    jobs.resolve([])
+    artifacts.resolve([])
+    await flushPromises()
+    wrapper.unmount()
   })
 
   it('restores a review job after reload and locks its source document', async () => {

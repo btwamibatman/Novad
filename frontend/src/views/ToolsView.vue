@@ -72,6 +72,7 @@ let interaction: RedactionInteraction | null = null
 let manualFindingSequence = 0
 let hydratedReviewJobId: number | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let workspaceLoadPromise: Promise<void> | null = null
 
 const pdfDocuments = computed(() =>
   documentsStore.documents.filter((document) => document.content_type === 'application/pdf'),
@@ -234,6 +235,19 @@ function restoreWorkspaceSelection(): void {
 }
 
 async function loadWorkspace(): Promise<void> {
+  if (workspaceLoadPromise) {
+    await workspaceLoadPromise
+    return
+  }
+  workspaceLoadPromise = loadWorkspaceOnce()
+  try {
+    await workspaceLoadPromise
+  } finally {
+    workspaceLoadPromise = null
+  }
+}
+
+async function loadWorkspaceOnce(): Promise<void> {
   workspaceLoadFailed.value = false
   try {
     const [loadedJobs, loadedArtifacts] = await Promise.all([

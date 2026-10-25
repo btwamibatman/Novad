@@ -18,6 +18,29 @@ describe('requestJson', () => {
     })
   })
 
+  it.each([
+    'Application/JSON; Charset=UTF-8',
+    'application/problem+json',
+  ])('parses the JSON media type %s', async (contentType) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'Structured response' }), {
+          status: 400,
+          headers: { 'Content-Type': contentType },
+        }),
+      ),
+    )
+
+    const error = await requestJson('/api/documents').catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({
+      message: 'Structured response',
+      payload: { detail: 'Structured response' },
+    })
+  })
+
   it('normalizes API errors and preserves Retry-After', async () => {
     vi.stubGlobal(
       'fetch',

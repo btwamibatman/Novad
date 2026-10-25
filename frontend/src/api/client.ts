@@ -33,6 +33,11 @@ function errorMessage(payload: ApiErrorPayload | string | null): string {
   return 'Request failed'
 }
 
+function isJsonContentType(contentType: string): boolean {
+  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+  return mediaType === 'application/json' || mediaType.endsWith('+json')
+}
+
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     credentials: 'same-origin',
@@ -46,7 +51,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}): Prom
   const contentType = response.headers.get('content-type') ?? ''
   const body = await response.text()
   let payload: ApiErrorPayload | string | null = body
-  if (contentType.includes('application/json')) {
+  if (isJsonContentType(contentType)) {
     try {
       payload = JSON.parse(body) as ApiErrorPayload | null
     } catch (error) {

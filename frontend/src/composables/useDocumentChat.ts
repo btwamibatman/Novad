@@ -10,7 +10,6 @@ import type { AIChatMessage, AIChatMode } from '@/types/document'
 import { readStoredValue, writeStoredValue } from '@/utils/storage'
 
 interface StoredChat {
-  expires_at: string
   messages: AIChatMessage[]
 }
 
@@ -50,20 +49,15 @@ export function useDocumentChat() {
     return `document-console-chat:${sessionId || 'anonymous'}:${documentId}`
   }
 
-  function sessionExpired(): boolean {
-    const expiresAt = authStore.session?.expires_at
-    return Boolean(expiresAt && new Date(expiresAt).getTime() <= Date.now())
-  }
-
   function readMessages(documentId: number): AIChatMessage[] {
-    if (!authStore.session || sessionExpired()) {
+    if (!authStore.session) {
       return []
     }
     try {
       const stored = JSON.parse(
         readStoredValue(storageKey(documentId), sessionStorage) || 'null',
       ) as StoredChat | null
-      if (!stored || stored.expires_at !== authStore.session.expires_at) {
+      if (!stored) {
         return []
       }
       return Array.isArray(stored.messages) ? stored.messages : []
@@ -80,7 +74,6 @@ export function useDocumentChat() {
     writeStoredValue(
       storageKey(documentId),
       JSON.stringify({
-        expires_at: authStore.session.expires_at,
         messages: limitedMessages,
       }),
       sessionStorage,
@@ -216,7 +209,7 @@ export function useDocumentChat() {
     { immediate: true, deep: true },
   )
   watch(
-    [selectedDocumentId, () => authStore.session?.expires_at],
+    [selectedDocumentId, () => authStore.session?.session_id],
     ([documentId]) => {
       abortRequest()
       messages.value = documentId ? readMessages(documentId) : []

@@ -116,6 +116,21 @@ describe('document chat requests', () => {
     expect(() => wrapper.unmount()).not.toThrow()
   })
 
+  it('restores chat history after the server extends the same session', async () => {
+    sessionStorage.setItem(
+      'document-console-chat:chat-test:1',
+      JSON.stringify({
+        expires_at: '2026-11-05T09:00:00Z',
+        messages: [{ role: 'user', content: 'Persisted question' }],
+      }),
+    )
+
+    const { wrapper } = await setup()
+
+    expect(wrapper.text()).toContain('Persisted question')
+    wrapper.unmount()
+  })
+
   it.each([
     [new TypeError('Failed to fetch'), 'Check your connection'],
     [new ApiError('Too many requests', 429, null, '30'), '30'],

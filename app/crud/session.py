@@ -83,9 +83,6 @@ def cleanup_expired_sessions(db: DbSession) -> int:
         Document.user_id.is_(None),
     )
     stored_paths = list(db.scalars(select(Document.stored_path).where(*legacy_filter)).all())
-    for stored_path in stored_paths:
-        remove_stored_file(stored_path)
-
     document_ids = list(
         db.scalars(select(Document.id).where(*legacy_filter)).all()
     )
@@ -99,4 +96,6 @@ def cleanup_expired_sessions(db: DbSession) -> int:
     )
     db.execute(delete(UserSession).where(UserSession.id.in_(expired_ids)))
     db.commit()
+    for stored_path in stored_paths:
+        remove_stored_file(stored_path)
     return len(expired_ids)

@@ -25,6 +25,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   const loading = ref(false)
   const loadFailed = ref(false)
   const pendingAction = ref<PendingAction | null>(null)
+  let loadSequence = 0
 
   const selectedDocument = computed(
     () => documents.value.find((document) => document.id === selectedId.value) ?? null,
@@ -61,6 +62,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   async function load(refreshSession = true): Promise<void> {
+    const requestId = ++loadSequence
     loading.value = true
     loadFailed.value = false
     try {
@@ -71,6 +73,7 @@ export const useDocumentsStore = defineStore('documents', () => {
         dashboardApi.summary(),
         documentsApi.list(),
       ])
+      if (requestId !== loadSequence) return
       summary.value = nextSummary
       documents.value = nextDocuments
       if (
@@ -80,10 +83,11 @@ export const useDocumentsStore = defineStore('documents', () => {
         selectedId.value = null
       }
     } catch (error) {
+      if (requestId !== loadSequence) return
       loadFailed.value = true
       throw error
     } finally {
-      loading.value = false
+      if (requestId === loadSequence) loading.value = false
     }
   }
 
@@ -155,6 +159,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   function clear(): void {
+    loadSequence += 1
     documents.value = []
     summary.value = null
     selectedId.value = null

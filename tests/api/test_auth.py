@@ -1,5 +1,6 @@
 from argparse import Namespace
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -243,6 +244,43 @@ def test_expired_login_session_does_not_delete_user_document(client, pdf_documen
         assert db_document.user_id is not None
         assert db_document.session_id is None
     finally:
+        db.close()
+
+
+def test_expired_session_cleanup_keeps_file_when_commit_fails(monkeypatch):
+    stored_path = Path(settings.storage_dir) / "legacy.pdf"
+    stored_path.parent.mkdir(parents=True)
+    stored_path.write_bytes(b"legacy document")
+
+    db = TestingSessionLocal()
+    try:
+        legacy_session = UserSession(expires_at=utc_now() - timedelta(seconds=1))
+        db.add(legacy_session)
+        db.flush()
+        db.add(
+            Document(
+                session_id=legacy_session.id,
+                user_id=None,
+                filename="legacy.pdf",
+                stored_filename="legacy.pdf",
+                stored_path=str(stored_path),
+                content_type="application/pdf",
+                size_bytes=stored_path.stat().st_size,
+            )
+        )
+        db.commit()
+
+        def fail_commit():
+            raise RuntimeError("database commit failed")
+
+        monkeypatch.setattr(db, "commit", fail_commit)
+
+        with pytest.raises(RuntimeError, match="database commit failed"):
+            session_crud.cleanup_expired_sessions(db)
+
+        assert stored_path.read_bytes() == b"legacy document"
+    finally:
+        db.rollback()
         db.close()
 
 

@@ -90,9 +90,10 @@ Passing these tests does **not** establish the following:
 
 - PostgreSQL compatibility, migration correctness or concurrent worker locking:
   tests create tables from SQLAlchemy metadata in SQLite; they do not run Alembic.
-- Application startup/shutdown or the periodic session-cleanup task: the shared
-  API clients deliberately do not enter the application lifespan, which would
-  initialize the configured application database.
+- Application startup/shutdown integration: the shared API clients deliberately
+  do not enter the application lifespan, which would initialize the configured
+  application database. Failure recovery in the periodic session-cleanup loop is
+  unit-tested, but its scheduling against a live database is not.
 - Full browser-to-backend integration: Playwright serves the real Vue application
   through Vite but intercepts API requests with fixtures. Production assets are
   built separately, not served by these browser tests.

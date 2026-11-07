@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from collections.abc import AsyncIterator
@@ -24,6 +25,7 @@ WEB_DIR = BASE_DIR / "web"
 WEB_DIST_DIR = WEB_DIR / "dist"
 WEB_INDEX = WEB_DIST_DIR / "index.html"
 READINESS_TIMEOUT_SECONDS = 3
+logger = logging.getLogger(__name__)
 
 
 async def cleanup_expired_sessions_loop() -> None:
@@ -32,6 +34,10 @@ async def cleanup_expired_sessions_loop() -> None:
         db = create_session()
         try:
             cleanup_expired_sessions(db)
+        except Exception:
+            logger.exception("Expired session cleanup failed")
+            with suppress(Exception):
+                db.rollback()
         finally:
             db.close()
 

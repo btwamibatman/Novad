@@ -10,6 +10,18 @@ from app import main as main_module
 from app.core.config import settings
 
 
+class FakeSession:
+    def __init__(self) -> None:
+        self.rolled_back = False
+        self.closed = False
+
+    def rollback(self) -> None:
+        self.rolled_back = True
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def test_ready_checks_database_without_authentication(anonymous_client, monkeypatch):
     monkeypatch.setattr(settings, "database_url", "sqlite://")
 
@@ -48,6 +60,37 @@ def test_ready_times_out_even_when_database_resolution_blocks(monkeypatch):
             release.set()
 
     asyncio.run(check())
+
+
+def test_session_cleanup_loop_continues_after_failure(monkeypatch, caplog):
+    sessions = [FakeSession(), FakeSession()]
+    cleanup_calls = []
+    sleep_calls = 0
+
+    async def controlled_sleep(_seconds):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls > 2:
+            raise asyncio.CancelledError
+
+    def cleanup(db):
+        cleanup_calls.append(db)
+        if len(cleanup_calls) == 1:
+            raise RuntimeError("temporary database failure")
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", controlled_sleep)
+    monkeypatch.setattr(main_module, "create_session", lambda: sessions.pop(0))
+    monkeypatch.setattr(main_module, "cleanup_expired_sessions", cleanup)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main_module.cleanup_expired_sessions_loop())
+
+    first, second = cleanup_calls
+    assert first.rolled_back is True
+    assert first.closed is True
+    assert second.rolled_back is False
+    assert second.closed is True
+    assert "Expired session cleanup failed" in caplog.text
 
 
 def test_health_returns_ok(client):

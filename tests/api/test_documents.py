@@ -16,7 +16,7 @@ from app.services import text_analysis
 from app.services.ai import content_review as ai_content_review
 from app.services.ai import layout_review as ai_layout_review
 from app.services.ai import summary as ai_summary
-from app.services.file_storage import resolve_stored_path
+from app.services.file_storage import resolve_content_type, resolve_stored_path
 from tests.helpers.pdf import (
     make_pdf_with_text,
     make_pdf_with_text_and_blank_pages,
@@ -209,6 +209,14 @@ def test_upload_pdf_with_charset_content_type(client):
 
     assert response.status_code == 201
     assert response.json()["content_type"] == "application/pdf"
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    ["Application/PDF", "APPLICATION/PDF; Charset=binary"],
+)
+def test_pdf_content_type_is_case_insensitive(content_type):
+    assert resolve_content_type("sample.PDF", content_type) == "application/pdf"
 
 
 def test_resolve_stored_path_does_not_duplicate_storage_dir(tmp_path, monkeypatch):

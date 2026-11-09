@@ -61,7 +61,9 @@ def resolve_content_type(filename: str, content_type: str | None) -> str:
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Only PDF files are supported",
         )
-    normalized_type = "" if content_type is None else content_type.split(";")[0].strip()
+    normalized_type = (
+        "" if content_type is None else content_type.split(";")[0].strip().lower()
+    )
     if normalized_type in {"", "application/octet-stream", expected_type}:
         return expected_type
     raise HTTPException(

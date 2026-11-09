@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
+from math import ceil
 from time import monotonic
 
 from fastapi import HTTPException, status
@@ -54,7 +55,7 @@ async def enforce_rate_limit(
             timestamps.popleft()
 
         if len(timestamps) >= limit:
-            retry_after = max(1, int(window_seconds - (now - timestamps[0])))
+            retry_after = max(1, ceil(window_seconds - (now - timestamps[0])))
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded",

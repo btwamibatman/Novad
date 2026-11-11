@@ -98,6 +98,14 @@ class Settings(BaseSettings):
             )
         if self.max_pdf_pages <= 0:
             raise ValueError("MAX_PDF_PAGES must be greater than zero")
+        if self.session_ttl_minutes <= 0:
+            raise ValueError("SESSION_TTL_MINUTES must be greater than zero")
+        if self.session_cleanup_interval_seconds <= 0:
+            raise ValueError(
+                "SESSION_CLEANUP_INTERVAL_SECONDS must be greater than zero"
+            )
+        if self.session_storage_quota_bytes <= 0:
+            raise ValueError("SESSION_STORAGE_QUOTA_BYTES must be greater than zero")
         if self.ocr_render_dpi <= 0:
             raise ValueError("OCR_RENDER_DPI must be greater than zero")
         if self.ocr_min_render_dpi <= 0 or self.ocr_min_render_dpi > self.ocr_render_dpi:

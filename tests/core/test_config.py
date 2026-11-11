@@ -55,6 +55,20 @@ def test_pdf_page_limit_must_be_positive():
         Settings(_env_file=None, max_pdf_pages=0)
 
 
+@pytest.mark.parametrize(
+    ("setting", "environment_name"),
+    [
+        ("session_ttl_minutes", "SESSION_TTL_MINUTES"),
+        ("session_cleanup_interval_seconds", "SESSION_CLEANUP_INTERVAL_SECONDS"),
+        ("session_storage_quota_bytes", "SESSION_STORAGE_QUOTA_BYTES"),
+    ],
+)
+@pytest.mark.parametrize("invalid_value", [0, -1])
+def test_session_limits_must_be_positive(setting, environment_name, invalid_value):
+    with pytest.raises(ValidationError, match=environment_name):
+        Settings(_env_file=None, **{setting: invalid_value})
+
+
 def test_ai_job_defaults_and_api_key_repr_are_safe():
     test_settings = Settings(_env_file=None, gemini_api_key="top-secret")
 

@@ -211,6 +211,13 @@ def test_upload_pdf_with_charset_content_type(client):
     assert response.json()["content_type"] == "application/pdf"
 
 
+def test_upload_preserves_extension_when_long_filename_is_truncated(client):
+    response = upload_pdf(client, filename=f"{'a' * 300}.pdf")
+
+    assert response.status_code == 201
+    assert response.json()["filename"] == f"{'a' * 251}.pdf"
+
+
 @pytest.mark.parametrize(
     "content_type",
     ["Application/PDF", "APPLICATION/PDF; Charset=binary"],

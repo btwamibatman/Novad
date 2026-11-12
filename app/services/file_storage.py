@@ -50,6 +50,12 @@ def clean_filename(filename: str | None) -> str:
     clean_name = filename.replace("\\", "/").split("/")[-1].strip()
     if not clean_name or clean_name in {".", ".."}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename")
+    if len(clean_name) <= 255:
+        return clean_name
+
+    extension = Path(clean_name).suffix
+    if extension and len(extension) < 255:
+        return f"{clean_name[: 255 - len(extension)]}{extension}"
     return clean_name[:255]
 
 

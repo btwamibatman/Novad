@@ -525,6 +525,7 @@ def download_document(
         resolve_stored_path(db_document.stored_path),
         media_type=db_document.content_type,
         filename=db_document.filename,
+        headers={"Cache-Control": "private, no-store"},
     )
 
 

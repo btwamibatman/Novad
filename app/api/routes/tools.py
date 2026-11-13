@@ -149,7 +149,12 @@ def download_artifact(
 ) -> FileResponse:
     artifact = _owned_artifact(db, artifact_id, current_session.user_id)
     path = _available_artifact_path(artifact)
-    return FileResponse(path, media_type=artifact.content_type, filename=artifact.filename)
+    return FileResponse(
+        path,
+        media_type=artifact.content_type,
+        filename=artifact.filename,
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.delete("/artifacts/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -343,7 +348,12 @@ def download_result(
     path = Path(job.result_path or "")
     if job.status != "completed" or not path.is_file():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Result is not ready")
-    return FileResponse(path, media_type=job.result_content_type, filename=job.result_filename)
+    return FileResponse(
+        path,
+        media_type=job.result_content_type,
+        filename=job.result_filename,
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 def _owned_job(db: Session, job_id: int, user_id: int) -> ToolJob:

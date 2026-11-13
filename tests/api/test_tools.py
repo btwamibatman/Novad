@@ -45,6 +45,7 @@ def test_low_compression_runs_locally_and_returns_download(client):
 
     download = client.get(f"/api/tools/jobs/{job['id']}/download")
     assert download.status_code == 200
+    assert download.headers["cache-control"] == "private, no-store"
     assert download.content.startswith(b"%PDF-")
 
 

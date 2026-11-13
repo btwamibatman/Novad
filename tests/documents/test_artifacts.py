@@ -117,6 +117,7 @@ def test_redaction_creates_verified_ai_ready_artifact(client, other_client):
     assert client.get(f"/api/tools/artifacts/{artifact_id}/pages/1").status_code == 200
     download = client.get(f"/api/tools/artifacts/{artifact_id}/download")
     assert download.status_code == 200
+    assert download.headers["cache-control"] == "private, no-store"
     assert download.content.startswith(b"%PDF-")
 
     with TestingSessionLocal() as db:

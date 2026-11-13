@@ -383,7 +383,9 @@ def test_failed_analysis_job_can_be_retried(
     failed = client.get(f"/api/documents/{pdf_document_id}").json()
     assert failed["status"] == "failed"
     assert failed["error_message"] == "temporary OCR failure"
-    assert client.get(f"/api/documents/{pdf_document_id}/download").status_code == 200
+    download = client.get(f"/api/documents/{pdf_document_id}/download")
+    assert download.status_code == 200
+    assert download.headers["cache-control"] == "private, no-store"
 
     retry = client.post(f"/api/documents/{pdf_document_id}/analyze")
     analysis_runner()

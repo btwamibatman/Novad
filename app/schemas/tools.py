@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +10,7 @@ DocumentArtifactStatus = Literal[
 ]
 RedactionMode = Literal["black", "pseudonymize"]
 RedactionCategory = Literal["personal", "financial", "visual", "service", "context"]
+RedactionFindingId = Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class CompressionRequest(BaseModel):
@@ -42,7 +43,7 @@ class RedactionArea(BaseModel):
 
 
 class RedactionApplyRequest(BaseModel):
-    finding_ids: list[str] = Field(default_factory=list)
+    finding_ids: list[RedactionFindingId] = Field(default_factory=list, max_length=500)
     areas: list[RedactionArea] = Field(default_factory=list, max_length=500)
     mode: RedactionMode = "black"
 

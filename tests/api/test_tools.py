@@ -111,6 +111,26 @@ def test_redaction_accepts_manually_drawn_area(client):
         assert "123456789012" not in document[0].get_text()
 
 
+def test_redaction_rejects_too_many_finding_ids(client):
+    response = client.post(
+        "/api/tools/jobs/1/apply-redaction",
+        json={"finding_ids": [f"finding-{index}" for index in range(501)]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "too_long"
+
+
+def test_redaction_rejects_oversized_finding_id(client):
+    response = client.post(
+        "/api/tools/jobs/1/apply-redaction",
+        json={"finding_ids": ["f" * 101]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "string_too_long"
+
+
 def test_pdf_to_word_uses_editable_local_pipeline(client):
     document_id = _upload_private_pdf(client)
     queued = client.post("/api/tools/pdf-to-word", json={"document_id": document_id})

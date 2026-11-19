@@ -393,6 +393,33 @@ def test_failed_analysis_job_can_be_retried(
     assert client.get(f"/api/documents/{pdf_document_id}").json()["status"] == "processed"
 
 
+def test_analysis_job_rolls_back_failed_progress_commit_before_recording_error(
+    client,
+    pdf_document_id,
+    analysis_runner,
+    monkeypatch,
+):
+    def fail_during_progress(document, progress_callback=None):
+        progress_callback(1, {1}, "invalid-progress")
+
+    monkeypatch.setattr(
+        "app.services.analysis_jobs.extract_text_pages",
+        fail_during_progress,
+    )
+    analysis_runner()
+
+    document = client.get(f"/api/documents/{pdf_document_id}").json()
+    assert document["status"] == "failed"
+    assert document["analysis_progress"] == {}
+    assert "not JSON serializable" in document["error_message"]
+    with TestingSessionLocal() as db:
+        job = db.scalar(
+            select(AnalysisJob).where(AnalysisJob.document_id == pdf_document_id)
+        )
+        assert job.status == "failed"
+        assert "not JSON serializable" in job.error_message
+
+
 # Summaries and document questions
 
 

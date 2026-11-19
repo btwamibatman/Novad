@@ -137,3 +137,29 @@ def test_tool_jobs_are_scoped_to_the_current_user(client, other_client):
     job_id = queued.json()["id"]
     assert other_client.get(f"/api/tools/jobs/{job_id}").status_code == 404
     assert other_client.get(f"/api/tools/jobs/{job_id}/download").status_code == 404
+
+
+def test_tool_job_rolls_back_failed_progress_commit_before_recording_error(
+    client,
+    monkeypatch,
+):
+    document_id = _upload_private_pdf(client)
+    queued = client.post(
+        "/api/tools/compress",
+        json={"document_id": document_id, "mode": "low"},
+    )
+
+    def fail_during_progress(source, destination, mode, progress):
+        progress(None, "invalid-progress")
+
+    monkeypatch.setattr(
+        "app.services.tool_jobs.document_tools.compress_pdf",
+        fail_during_progress,
+    )
+    _run_tools()
+
+    job = client.get(f"/api/tools/jobs/{queued.json()['id']}").json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["progress"] == 1
+    assert "NOT NULL constraint failed" in job["error_message"]

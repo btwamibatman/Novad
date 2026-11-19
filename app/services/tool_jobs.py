@@ -98,10 +98,20 @@ def process_tool_job(
                 raise document_tools.DocumentToolError("Unknown tool job")
             db.commit()
         except Exception as error:
-            logger.exception("Tool job failed: job_id=%s kind=%s stage=%s", job_id, job.kind, job.stage)
+            error_message = str(error)
+            db.rollback()
+            job = db.get(ToolJob, job_id)
+            if job is None:
+                return
+            logger.exception(
+                "Tool job failed: job_id=%s kind=%s stage=%s",
+                job_id,
+                job.kind,
+                job.stage,
+            )
             job.status = "failed"
             job.stage = "failed"
-            job.error_message = str(error)
+            job.error_message = error_message
             job.finished_at = utc_now()
             db.commit()
 

@@ -157,6 +157,14 @@ def process_analysis_job(
                 chunks=chunks,
             )
         except Exception as error:
+            error_message = str(error)
+            db.rollback()
+            job = db.get(AnalysisJob, job_id)
+            if job is None:
+                return
+            document = db.get(Document, job.document_id)
+            if document is None:
+                return
             document_crud.update_document_analysis(
                 db,
                 document,
@@ -165,11 +173,11 @@ def process_analysis_job(
                 extraction_quality="unknown",
                 extraction_quality_meta={},
                 language_distribution={},
-                error_message=str(error),
+                error_message=error_message,
                 chunks=[],
             )
             job.status = "failed"
-            job.error_message = str(error)
+            job.error_message = error_message
             job.finished_at = utc_now()
             db.commit()
             return

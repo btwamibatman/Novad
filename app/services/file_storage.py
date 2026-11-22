@@ -122,14 +122,25 @@ async def save_upload(file: UploadFile) -> tuple[str, str, str, str, int]:
 
 def resolve_stored_path(stored_path: str) -> Path:
     path = Path(stored_path)
-    if path.is_absolute():
-        return path
     storage_dir = Path(settings.storage_dir)
+    if path.is_absolute():
+        candidate = path
+    else:
+        try:
+            path.relative_to(storage_dir)
+        except ValueError:
+            candidate = storage_dir / path
+        else:
+            candidate = path
+
+    storage_root = storage_dir.resolve()
     try:
-        path.relative_to(storage_dir)
-    except ValueError:
-        return storage_dir / path
-    return path
+        candidate.resolve().relative_to(storage_root)
+    except ValueError as error:
+        raise ValueError(
+            "Stored path must stay within the configured storage directory"
+        ) from error
+    return candidate
 
 
 def remove_stored_file(stored_path: str) -> None:

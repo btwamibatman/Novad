@@ -250,6 +250,23 @@ def test_resolve_stored_path_ignores_same_named_file_in_working_directory(
     assert resolve_stored_path("sample.pdf") == storage_dir / "sample.pdf"
 
 
+@pytest.mark.parametrize("stored_path", ["../outside.pdf", "/tmp/outside.pdf"])
+def test_resolve_stored_path_rejects_paths_outside_storage(stored_path):
+    with pytest.raises(ValueError, match="within the configured storage directory"):
+        resolve_stored_path(stored_path)
+
+
+def test_resolve_stored_path_rejects_symlinks_outside_storage(tmp_path):
+    storage_dir = Path(settings.storage_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"private")
+    (storage_dir / "linked.pdf").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="within the configured storage directory"):
+        resolve_stored_path("linked.pdf")
+
+
 def test_list_and_get_document(client, pdf_document_id):
     response = client.get("/api/documents")
     assert response.status_code == 200

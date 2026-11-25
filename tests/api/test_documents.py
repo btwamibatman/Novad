@@ -722,6 +722,33 @@ def test_content_review_reports_synchronous_size_limit(
 # Layout review and external image consent
 
 
+def test_local_layout_review_does_not_record_external_consent(
+    client, pdf_document_id, monkeypatch
+):
+    monkeypatch.setattr(settings, "ai_provider", "ollama")
+    monkeypatch.setattr(
+        ai_layout_review,
+        "review_pdf_layout",
+        lambda _path: ai_layout_review.LayoutReviewResult(
+            text="The local visual review completed.",
+            model="local-test-model",
+            total_pages=1,
+            reviewed_pages=[1],
+            dpi=150,
+            complete=True,
+        ),
+    )
+
+    response = client.post(
+        f"/api/documents/{pdf_document_id}/layout-review"
+    )
+
+    assert response.status_code == 200
+    meta = response.json()["layout_review_meta"]
+    assert meta["external_processing"] is False
+    assert meta["external_image_processing_consent"] is False
+
+
 def test_layout_review_does_not_require_text_analysis(client, pdf_document_id, monkeypatch):
     monkeypatch.setattr(settings, "ai_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_service_tier", "paid")

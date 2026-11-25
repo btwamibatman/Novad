@@ -355,9 +355,12 @@ async def review_document_layout(
     db: Session = Depends(get_db),
     current_session: UserSession = Depends(get_current_session),
 ) -> Document:
-    if settings.ai_provider.strip().lower() != "ollama" and (
-        payload is None or not payload.consent_to_external_image_processing
-    ):
+    provider = settings.ai_provider.strip().lower()
+    external_processing = provider != "ollama"
+    external_consent = bool(
+        payload is not None and payload.consent_to_external_image_processing
+    )
+    if external_processing and not external_consent:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Explicit consent to external image processing is required",
@@ -370,7 +373,7 @@ async def review_document_layout(
             detail="Layout review is available only for PDF documents",
         )
     if (
-        settings.ai_provider.strip().lower() == "gemini"
+        provider == "gemini"
         and settings.gemini_service_tier == "unpaid"
     ):
         raise HTTPException(
@@ -425,8 +428,10 @@ async def review_document_layout(
             "requested_dpi": settings.layout_review_dpi,
             "adaptive_dpi": result.dpi < settings.layout_review_dpi,
             "provider": settings.ai_provider,
-            "external_processing": settings.ai_provider.strip().lower() == "gemini",
-            "external_image_processing_consent": True,
+            "external_processing": external_processing,
+            "external_image_processing_consent": (
+                external_processing and external_consent
+            ),
             "standard": ai_layout_review.RK_LAYOUT_STANDARD_REFERENCE,
             "standard_source": ai_layout_review.RK_LAYOUT_STANDARD_SOURCE,
             "reviewed_at": utc_now().isoformat(),

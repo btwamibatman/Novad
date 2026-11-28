@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app import create_user as create_user_cli
 from app import claim_legacy_documents as claim_legacy_cli
+from app.api.routes import auth as auth_routes
 from app.core.config import settings
 from app.core.database import get_db
 from app.crud.user import UserAlreadyExistsError, create_user, get_user_by_username
@@ -217,6 +218,44 @@ def test_login_rate_limit_blocks_repeated_attempts(anonymous_client):
 
     assert response.status_code == 429
     assert int(response.headers["Retry-After"]) >= 1
+
+
+def test_login_rate_limit_blocks_distributed_attempts_for_same_account(
+    anonymous_client,
+    monkeypatch,
+):
+    del anonymous_client
+    add_user("admin", "correct password")
+    monkeypatch.setattr(auth_routes, "verify_password_or_dummy", lambda *_args: False)
+    clients = []
+    try:
+        for attempt in range(auth_routes.LOGIN_ACCOUNT_LIMIT):
+            browser = TestClient(
+                app,
+                client=(f"198.51.100.{attempt + 1}", 50000),
+            )
+            clients.append(browser)
+            response = browser.post(
+                "/api/auth/login",
+                json={
+                    "username": " ADMIN " if attempt % 2 else "admin",
+                    "password": "wrong password",
+                },
+            )
+            assert response.status_code == 401
+
+        blocked = TestClient(app, client=("203.0.113.1", 50000))
+        clients.append(blocked)
+        response = blocked.post(
+            "/api/auth/login",
+            json={"username": "Admin", "password": "wrong password"},
+        )
+
+        assert response.status_code == 429
+        assert int(response.headers["Retry-After"]) >= 1
+    finally:
+        for browser in clients:
+            browser.close()
 
 
 def test_same_user_can_access_documents_from_a_new_login(client, pdf_document_id):

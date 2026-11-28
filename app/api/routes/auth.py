@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,15 @@ from app.services.password_hashing import verify_password_or_dummy
 from app.services.rate_limit import enforce_rate_limit
 
 router = APIRouter()
+
+LOGIN_IP_LIMIT = 5
+LOGIN_ACCOUNT_LIMIT = 10
+
+
+def _login_account_rate_key(username: str) -> str:
+    normalized = username.strip().casefold()
+    digest = sha256(normalized.encode("utf-8")).hexdigest()
+    return f"login-account:{digest}"
 
 
 def auth_session_read(db_session: UserSession, db_user: User) -> AuthSessionRead:
@@ -31,7 +42,16 @@ async def login(
     db: Session = Depends(get_db),
 ) -> AuthSessionRead:
     client_host = request.client.host if request.client else "unknown"
-    await enforce_rate_limit(f"login:{client_host}", "auth", limit=5)
+    await enforce_rate_limit(
+        f"login:{client_host}",
+        "auth",
+        limit=LOGIN_IP_LIMIT,
+    )
+    await enforce_rate_limit(
+        _login_account_rate_key(payload.username),
+        "auth",
+        limit=LOGIN_ACCOUNT_LIMIT,
+    )
 
     try:
         db_user = user_crud.get_user_by_username(db, payload.username)
